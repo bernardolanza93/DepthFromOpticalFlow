@@ -1,21 +1,5 @@
-import sys
-
-import cv2
-import matplotlib.pyplot as plt
+from utility_library.additional_functions import *
 import numpy as np
-import os
-import pandas as pd
-import csv
-from additional_functions import *
-from scipy.stats import linregress
-from scipy.optimize import curve_fit
-import numpy as np
-from scipy.stats import norm
-from itertools import groupby
-from statistics import mean
-
-
-
 
 # Salva il dataframe su un file Excel
 output_excel = 'marker_data.xlsx'
@@ -139,25 +123,25 @@ else:
 #             file.write("constant,constant_uncert,velocity\n")
 #
 #
-#         data = pd.read_excel(file_path)
+#         data_robot_encoder = pd.read_excel(file_path)
 #         # Rendi positivi i valori di vx e vx_std
 #
 #         # Rendi positivi i valori di vx e vx_std
-#         data['vx'] = abs(data['vx'])
+#         data_robot_encoder['vx'] = abs(data_robot_encoder['vx'])
 #
 #
 #         # Rimuovi le righe con zeri o valori mancanti nella riga
-#         data = data[(data != 0).all(1)]
+#         data_robot_encoder = data_robot_encoder[(data_robot_encoder != 0).all(1)]
 #
 #         # Dividi il DataFrame in base al valore della colonna vx_3D
-#         gruppi = data.groupby('vx_3D')
+#         gruppi = data_robot_encoder.groupby('vx_3D')
 #
 #         # Crea un dizionario di sotto-dataframe, dove ogni chiave è un valore univoco di vx_3D
 #         sotto_dataframe = {key: gruppi.get_group(key) for key in gruppi.groups}
 #
 #         for chiave, valore in sotto_dataframe.items():
 #             print(chiave, valore)
-#             data = sotto_dataframe[chiave]
+#             data_robot_encoder = sotto_dataframe[chiave]
 #
 #
 #
@@ -173,17 +157,17 @@ else:
 #
 #
 #
-#             x_fps = data['vx']
+#             x_fps = data_robot_encoder['vx']
 #
 #
 #
 #
 #
-#             marker_n = data['marker']
+#             marker_n = data_robot_encoder['marker']
 #             x = [element * 60 for element in x_fps]
 #
 #
-#             y = data['z_mean']
+#             y = data_robot_encoder['z_mean']
 #
 #             SMOOTHING = 1
 #             window = 0
@@ -354,25 +338,25 @@ else:
 #         file.write("constant,constant_uncert,velocity\n")
 #
 #
-#     data = pd.read_excel(file_path)
+#     data_robot_encoder = pd.read_excel(file_path)
 #     # Rendi positivi i valori di vx e vx_std
 #
 #     # Rendi positivi i valori di vx e vx_std
-#     data['vx'] = abs(data['vx'])
+#     data_robot_encoder['vx'] = abs(data_robot_encoder['vx'])
 #
 #
 #     # Rimuovi le righe con zeri o valori mancanti nella riga
-#     data = data[(data != 0).all(1)]
+#     data_robot_encoder = data_robot_encoder[(data_robot_encoder != 0).all(1)]
 #
 #     # Dividi il DataFrame in base al valore della colonna vx_3D
-#     gruppi = data.groupby('vx_3D')
+#     gruppi = data_robot_encoder.groupby('vx_3D')
 #
 #     # Crea un dizionario di sotto-dataframe, dove ogni chiave è un valore univoco di vx_3D
 #     sotto_dataframe = {key: gruppi.get_group(key) for key in gruppi.groups}
 #
 #     for chiave, valore in sotto_dataframe.items():
 #         print(chiave, valore)
-#         data = sotto_dataframe[chiave]
+#         data_robot_encoder = sotto_dataframe[chiave]
 #
 #
 #
@@ -388,17 +372,17 @@ else:
 #
 #
 #
-#         x_fps = data['vx']
+#         x_fps = data_robot_encoder['vx']
 #
 #
 #
 #
 #
-#         marker_n = data['marker']
+#         marker_n = data_robot_encoder['marker']
 #         x = [element * 60 for element in x_fps]
 #
 #
-#         y = data['z_mean']
+#         y = data_robot_encoder['z_mean']
 #
 #         SMOOTHING = 0
 #         window = 0
@@ -529,12 +513,12 @@ else:
 #
 # def constant_analisis():
 #     # Leggi i dati dal file
-#     data = np.loadtxt("constant.txt", delimiter=',', skiprows=1)
+#     data_robot_encoder = np.loadtxt("constant.txt", delimiter=',', skiprows=1)
 #
 #     # Estrai le colonne
-#     constant_data = data[:, 0]
-#     constant_uncert_data = data[:, 1]
-#     velocity_data = data[:, 2]
+#     constant_data = data_robot_encoder[:, 0]
+#     constant_uncert_data = data_robot_encoder[:, 1]
+#     velocity_data = data_robot_encoder[:, 2]
 #
 #     # Fai la regressione lineare tenendo conto dell'incertezza sulla costante
 #     slope, intercept, r_squared = weighted_linregress_with_error_on_y(velocity_data, constant_data, 1 / constant_uncert_data)

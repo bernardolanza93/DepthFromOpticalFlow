@@ -19,6 +19,11 @@ import imutils
 import cv2
 from datetime import datetime
 import pyrealsense2 as rs
+import sys
+import os
+
+# Supponiamo che la tua sottocartella si chiami "sottocartella"
+sys.path.append(os.path.join(os.path.dirname(__file__), 'utility_library'))
 from misc_utility_library import *
 
 
@@ -248,14 +253,14 @@ def count_and_display_pixel(green, mask):
     return number_of_black_pix
 def writeCSVdata(time, data):
     """
-    write data 2 CSV
-    :param data: write to a csv file input data (append to the end)
+    write data_robot_encoder 2 CSV
+    :param data: write to a csv file input data_robot_encoder (append to the end)
     :return: nothing
     """
     # scrive su un file csv i dati estratti dalla rete Neurale
     name = ""
 
-    file = open('./data/' + time + '.csv', 'a')
+    file = open('./data_robot_encoder/' + time + '.csv', 'a')
     writer = csv.writer(file)
     writer.writerow(data)
     file.close()

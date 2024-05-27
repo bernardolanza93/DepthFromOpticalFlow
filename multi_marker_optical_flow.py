@@ -1,13 +1,5 @@
 import sys
-
-import cv2
-import matplotlib.pyplot as plt
-import numpy as np
 import os
-import pandas as pd
-import csv
-from additional_functions import *
-from multi_marker_data_analysis import *
 from scipy.stats import linregress
 from scipy.optimize import curve_fit
 import numpy as np
@@ -20,11 +12,16 @@ from scipy.signal import decimate
 from scipy.interpolate import interp1d
 from sklearn.metrics import r2_score, mean_squared_error, mean_absolute_error
 import seaborn as sns
-
-
+sys.path.append(os.path.join(os.path.dirname(__file__), 'utility_library'))
+from multi_marker_source_function import *
 import matplotlib.font_manager
 
+from decorator import *
 
+
+
+
+@log_function_call
 def find_signal_boundaries(signal, threshold=0.1):
     """
     Trova gli istanti di inizio e fine di un segnale che subisce variazioni repentine.
@@ -64,7 +61,7 @@ def find_signal_boundaries(signal, threshold=0.1):
 
     return start_idx, end_idx
 
-
+@log_function_call
 def calculate_theo_model_and_analyze(n_df,n_vy,win, vlim):
     # Separa le colonne in base al suffisso '_vx' e '_z'
     vx_columns = [col for col in n_df.columns if '_vx' in col]
@@ -132,7 +129,7 @@ def calculate_theo_model_and_analyze(n_df,n_vy,win, vlim):
 
     return  all_z , all_distance
 
-
+@log_function_call
 def merge_dataset_extr_int(x, vy ):
 
     vy = abs(vy)
@@ -355,7 +352,7 @@ def compute_dz(Vx, Vx_prime, fx, fy, cx, cy):
     return dz
 
 
-
+@log_function_call
 def windowing_vs_uncertanty(file_path):
     SHOW_PLOT = 0
 
@@ -567,10 +564,11 @@ def windowing_vs_uncertanty(file_path):
     plt.show()
 
 # Funzione per calcolare la distanza euclidea
+
 def calculate_distance_vector(x1, y1, x2_array, y2_array):
     return np.sqrt((x1 - x2_array) ** 2 + (y1 - y2_array) ** 2)
 
-
+@log_function_call
 def show_result_ex_file(file_path):
     SHOW_PLOT = 1
 
@@ -793,7 +791,7 @@ def show_result_ex_file(file_path):
         if SHOW_PLOT:
             plt.show()
 
-
+@log_function_call
 def constant_analisis():
     # Leggi i dati dal file
     data = np.loadtxt("constant.txt", delimiter=',', skiprows=1)
@@ -882,6 +880,7 @@ def iter_mp4_files(directory):
                 print(os.path.join(root, file))
                 yield os.path.join(root, file)
 
+@log_function_call
 def convert_position_to_speed():
     # Ottieni la directory corrente
     current_directory = os.getcwd()
@@ -951,11 +950,13 @@ def interpole_linear(common_timestamp, y1):
     # Verifica che x_new e y_linear abbiano la stessa lunghezza
     assert len(common_timestamp) == len(y1)
     return common_timestamp, y1
+
+@log_function_call
 def synchro_data_v_v_e_z(file_raw_optics):
     # Plot di tutti e tre i file CSV
-    # plot_increment("data/1b.csv", label='1b')
-    # plot_increment("data/2b.csv", label='2b')
-    # plot_increment("data/4b.csv", label='4b')
+    # plot_increment("data_robot_encoder/1b.csv", label='1b')
+    # plot_increment("data_robot_encoder/2b.csv", label='2b')
+    # plot_increment("data_robot_encoder/4b.csv", label='4b')
 
     # # Impostazioni del plot
     # plt.title('Incremento di Traslazione X normalizzato in metri al secondo')
@@ -968,9 +969,9 @@ def synchro_data_v_v_e_z(file_raw_optics):
     # plt.show()
 
     # Leggi i dati dai file CSV
-    data_1b = pd.read_csv("data/1b.csv", delimiter=",")
-    data_2b = pd.read_csv("data/2b.csv", delimiter=",")
-    data_4b = pd.read_csv("data/4b.csv", delimiter=",")
+    data_1b = pd.read_csv("data_robot_encoder/1b.csv", delimiter=",")
+    data_2b = pd.read_csv("data_robot_encoder/2b.csv", delimiter=",")
+    data_4b = pd.read_csv("data_robot_encoder/4b.csv", delimiter=",")
 
     # Estrai i segnali relativi alla traslazione X e i timestamp
     translation_x_2b = data_2b['/tf/base/tool0_controller/translation/x']
@@ -1130,7 +1131,7 @@ def synchro_data_v_v_e_z(file_raw_optics):
 
 def media_mobile(lista, window_size):
     """
-    Calcola la media mobile di una lista data una finestra di dimensione window_size.
+    Calcola la media mobile di una lista data_robot_encoder una finestra di dimensione window_size.
 
     :param lista: La lista di valori.
     :param window_size: La dimensione della finestra per il calcolo della media mobile.
@@ -1149,7 +1150,7 @@ def smoothing(x_fps, marker_n, window_size):
       Funzione che suddivide una lista in sottoliste basandosi sul cambio di marker ID e le riassembla mantenendo l'ordine originale.
 
       Argomenti:
-        data: Lista di dati da suddividere e riassemblare.
+        data_robot_encoder: Lista di dati da suddividere e riassemblare.
         marker_n: Lista di marker ID corrispondenti ai dati.
 
       Restituisce:
@@ -1599,14 +1600,14 @@ def plotter_raw_analys(df,v_rob):
 # show_result_ex_file(file_path)
 
 #
-#x_s, vy_s  =synchro_data_v_v_e_z("results_raw.xlsx")
-#merge_dataset_extr_int(x_s, vy_s)
+x_s, vy_s  =synchro_data_v_v_e_z("results_raw.xlsx")
+merge_dataset_extr_int(x_s, vy_s)
 
 #sys.exit()
 
 
-file_path_1 = 'dati_of/all_points_big_fix_speed.xlsx'
-show_result_ex_file(file_path_1)
+# file_path_1 = 'dati_of/all_points_big_fix_speed.xlsx'
+# show_result_ex_file(file_path_1)
 # windowing_vs_uncertanty(file_path_1)
 #
 #
