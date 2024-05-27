@@ -7,7 +7,7 @@ This project aims to develop a robust and cost-effective system for estimating d
 ## Key Features
 
 - **Optical Flow Calculation**: Utilizes the Lucas-Kanade method for calculating optical flow, tracking the movement of pixels between consecutive frames to estimate motion.
-- **Depth Estimation Model**: Based on the displacement of tracked points in the image plane, the depth (\( Z \)) is estimated using the relationship \( \frac{\Delta Y}{\delta y} = \frac{Z}{f_y} \), where \( \Delta Y \) is the displacement in the real-world coordinates and \( \delta y \) is the displacement in the image plane.
+- **Depth Estimation Model**: Based on the displacement of tracked points in the image plane, the depth (`Z`) is estimated using the relationship `ΔY / δy = Z / fy`, where `ΔY` is the displacement in the real-world coordinates and `δy` is the displacement in the image plane.
 - **Camera Calibration**: Ensures accurate depth estimation by correcting for lens distortion using a chessboard calibration method.
 - **Experimental Validation**: Employs Aruco markers to validate the system in controlled environments before deployment in the field.
 
@@ -19,7 +19,7 @@ Optical flow refers to the pattern of apparent motion of objects in a visual sce
 
 ### Depth Estimation
 
-Depth estimation in this project is achieved by analyzing the displacement of pixels in the image plane. The focal lengths \( f_x \) and \( f_y \) are assumed to be equal (for square pixels), allowing us to simplify the depth calculation. For non-square pixels, the focal lengths are considered separately.
+Depth estimation in this project is achieved by analyzing the displacement of pixels in the image plane. The focal lengths `fx` and `fy` are assumed to be equal (for square pixels), allowing us to simplify the depth calculation. For non-square pixels, the focal lengths are considered separately.
 
 ### Camera Calibration
 
@@ -27,7 +27,7 @@ To correct lens distortions, a chessboard pattern is used for camera calibration
 
 ### Error Minimization and Model Fitting
 
-The project employs non-linear least squares methods to fit the depth estimation model to the collected data. The model's performance is evaluated using the \( R^2 \) coefficient, which quantifies the proportion of variance in the observed data explained by the model. Techniques such as moving average filters are used to enhance the robustness of the optical flow metric, balancing between model uncertainty and latency.
+The project employs non-linear least squares methods to fit the depth estimation model to the collected data. The model's performance is evaluated using the `R^2` coefficient, which quantifies the proportion of variance in the observed data explained by the model. Techniques such as moving average filters are used to enhance the robustness of the optical flow metric, balancing between model uncertainty and latency.
 
 ## Getting Started
 
