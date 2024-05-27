@@ -43,8 +43,8 @@ The project employs non-linear least squares methods to fit the depth estimation
 
 1. Clone the repository:
     ```sh
-    git clone https://github.com/yourusername/depth-estimation-agriculture.git
-    cd depth-estimation-agriculture
+    git clone https://github.com/bernardolanza93/DepthFromOpticalFlow.git
+    cd DepthFromOpticalFlow
     ```
 
 2. Install the required libraries:
@@ -74,6 +74,6 @@ This project is licensed under the MIT License. See the `LICENSE` file for detai
 
 ## Acknowledgments
 
-- This project was developed by [Your Name], [Collaborators], and supported by the Department of Industrial and Mechanical Engineering, University of Brescia.
+- This project was developed by [bernardolanza93],  and supported by the Department of Industrial and Mechanical Engineering, University of Brescia.
 - Special thanks to the contributors of the OpenCV and Aruco libraries for their invaluable tools and resources.
 
