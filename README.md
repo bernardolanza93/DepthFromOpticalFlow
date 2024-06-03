@@ -100,11 +100,11 @@ This function analyzes the impact of different window sizes on the uncertainty o
 
 This section analyzes the experimental constant values obtained from the model fitting at different reference speeds.
 
-
+```
 EXP_Ks_RESULTS_EVALUATION = 0
 if EXP_Ks_RESULTS_EVALUATION:
 constant_analisis()
-
+```
 
 ### `constant_analisis`
 This function performs a detailed analysis of the experimental constant values derived from the model evaluation at various reference speeds.
@@ -112,12 +112,12 @@ This function performs a detailed analysis of the experimental constant values d
 ## Raw Robot and Optical Flow Data Validation
 
 This section involves the synchronization and validation of raw robot data with optical flow and depth information.
-
+```
 RAW_ROBOT_AND_RAW_OPTICAL_FLOW_VALIDATION = 1
 if RAW_ROBOT_AND_RAW_OPTICAL_FLOW_VALIDATION:
 x_s, vy_s = synchro_data_v_v_e_z("results_raw.xlsx")
 merge_dataset_extr_int(x_s, vy_s)
-
+```
 
 ### `synchro_data_v_v_e_z`
 This function synchronizes the external velocities of the robot to ensure a reliable robot path.
