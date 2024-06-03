@@ -1,22 +1,4 @@
-import sys
-import os
-from scipy.stats import linregress
-from scipy.optimize import curve_fit
-import numpy as np
-from scipy.stats import norm
-from itertools import groupby
-from statistics import mean
-from scipy.signal import savgol_filter
-from scipy.interpolate import interp1d
-from scipy.signal import decimate
-from scipy.interpolate import interp1d
-from sklearn.metrics import r2_score, mean_squared_error, mean_absolute_error
-import seaborn as sns
-sys.path.append(os.path.join(os.path.dirname(__file__), 'utility_library'))
 from multi_marker_source_function import *
-import matplotlib.font_manager
-
-from decorator import *
 
 
 
@@ -24,36 +6,35 @@ from decorator import *
 @log_function_call
 def find_signal_boundaries(signal, threshold=0.1):
     """
-    Trova gli istanti di inizio e fine di un segnale che subisce variazioni repentine.
+    Find the start and end times of a signal that undergoes rapid changes.
 
     Parameters:
-    signal (np.array): Il segnale di input.
-    threshold (float): La soglia per identificare variazioni significative nel segnale.
+    signal (np.array): The input signal.
+    threshold (float): The threshold for identifying significant changes in the signal.
 
     Returns:
-    (int, int): Istanti di inizio e fine del segnale significativo.
+    (int, int): Start and end times of the significant signal.
     """
-    # Calcola la derivata del segnale
+    # Calculate the derivative of the signal
     derivative = np.diff(signal)
 
-    # Identifica gli indici dove la variazione è significativa
-
+    # Identify indices where the change is significant
     significant_changes = np.where(np.abs(derivative) > threshold)[0]
 
     if len(significant_changes) == 0:
         return None, None
 
-    # Prendi il primo e l'ultimo cambiamento significativo
+    # Get the first and last significant change
     start_idx = significant_changes[0]
     end_idx = significant_changes[-1]
 
-    # Trova l'inizio reale prima del primo cambiamento significativo
+    # Find the real start before the first significant change
     for i in range(start_idx, 0, -1):
         if np.abs(signal[i]) < threshold:
             start_idx = i
             break
 
-    # Trova la fine reale dopo l'ultimo cambiamento significativo
+    # Find the real end after the last significant change
     for i in range(end_idx, len(signal) - 1):
         if np.abs(signal[i]) < threshold:
             end_idx = i
@@ -62,120 +43,127 @@ def find_signal_boundaries(signal, threshold=0.1):
     return start_idx, end_idx
 
 @log_function_call
-def calculate_theo_model_and_analyze(n_df,n_vy,win, vlim):
-    # Separa le colonne in base al suffisso '_vx' e '_z'
+def calculate_theo_model_and_analyze(n_df, n_vy, win, vlim):
+    """
+    Calculate the theoretical model and analyze the data.
+
+    Parameters:
+    n_df (DataFrame): The input DataFrame containing data.
+    n_vy (array): Array of velocities.
+    win (int): Window size for smoothing.
+    vlim (float): Velocity limit.
+
+    Returns:
+    tuple: Arrays of all_z and all_distance.
+    """
+    # Separate columns based on suffix '_vx' and '_z'
     vx_columns = [col for col in n_df.columns if '_vx' in col]
     z_columns = [col for col in n_df.columns if '_z' in col]
 
-    #result = [x * constant for x in n_vy]
-    # Vettori per raccogliere i dati
+    # Vectors to collect data
     all_z = []
     all_vx = []
     all_distance = []
     all_vy_robot = []
 
-
     for vx_col, z_col in zip(vx_columns, z_columns):
-        # Calcola la lista dist
+        # Smooth the data
         smoothed_vx = n_df[vx_col].rolling(window=win).mean()
         n_df[vx_col] = smoothed_vx
 
         dist = []
         for i in range(len(n_df)):
-            if n_vy[i] >  vlim:
+            if n_vy[i] > vlim:
                 if n_df[vx_col].iloc[i] != 0:
-                    if n_df[vx_col].iloc[i] != 0:
+                    dist.append(n_vy[i] * fx / (n_df[vx_col].iloc[i] * 60))
+                else:
+                    dist.append(np.nan)  # Handle division by zero
 
-                        dist.append(n_vy[i] * fx / (n_df[vx_col].iloc[i] * 60))
-                    else:
-                        dist.append(np.nan)  # Oppure qualsiasi altro valore per gestire la divisione per zero
+                # Append values to overall vectors
+                all_z.append(n_df[z_col].iloc[i])
+                all_vx.append(n_df[vx_col].iloc[i] * 60)
+                all_distance.append(n_vy[i] * fx / (n_df[vx_col].iloc[i] * 60))
+                all_vy_robot.append(n_vy[i])
 
-                    # Aggiungi i valori ai vettori complessivi
-                    all_z.append(n_df[z_col].iloc[i])
-                    all_vx.append((n_df[vx_col].iloc[i] * 60))
-                    all_distance.append(n_vy[i] * fx / (n_df[vx_col].iloc[i] * 60))
-                    all_vy_robot.append(n_vy[i])
-
-
-
-    # Converti le liste in array numpy
+    # Convert lists to numpy arrays
     all_z = np.array(all_z)
     all_distance = np.array(all_distance)
 
-    # Rimuovi i valori NaN
+    # Remove NaN values
     mask = ~np.isnan(all_z) & ~np.isnan(all_distance)
     all_z = all_z[mask]
     all_distance = all_distance[mask]
 
-    # Fitta il modello Y = X
-    y_pred = all_z  # Modello Y = X prevede che y_pred è uguale a x
+    # Fit the model Y = X
+    y_pred = all_z  # Model Y = X predicts y_pred is equal to x
 
-    # Calcola R^2
+    # Calculate R^2
     r2 = r2_score(all_distance, y_pred)
 
-    # Calcola altre metriche di bontà del fit
+    # Calculate other goodness-of-fit metrics
     mse = mean_squared_error(all_distance, y_pred)
     mae = mean_absolute_error(all_distance, y_pred)
     rmse = np.sqrt(mse)
 
-    # Calcola la dispersione media
-    dispersione_media = np.mean(np.abs(all_distance - y_pred))
+    # Calculate mean dispersion
+    mean_dispersion = np.mean(np.abs(all_distance - y_pred))
 
     print("R^2:", r2)
     print("Mean Squared Error (MSE):", mse)
     print("Root Mean Squared Error (RMSE):", rmse)
     print("Mean Absolute Error (MAE):", mae)
-    print("Dispersione Media:", dispersione_media)
+    print("Mean Dispersion:", mean_dispersion)
 
-    return  all_z , all_distance
+    return all_z, all_distance
+
 
 @log_function_call
-def merge_dataset_extr_int(x, vy ):
+def merge_dataset_extr_int(x, vy):
+    """
+    Merge dataset and extract interesting intervals.
 
+    Parameters:
+    x (array): Array of x values.
+    vy (array): Array of velocities.
+
+    Returns:
+    None
+    """
     vy = abs(vy)
-    # # Plotta il segnale di velocità medio e il segnale di velocità medio filtrato
 
-
-
-    # Percorso del file CSV
+    # Path to the CSV file
     file_path = '/home/mmt-ben/MAPPER_AGRI_MULTICAM/of_raw_re_output_1.csv'
 
-
-    # Carica il file CSV
+    # Load the CSV file
     df = pd.read_csv(file_path)
 
-    # Rimuovi le colonne che contengono "164"
+    # Remove columns that contain "164"
     df = df.loc[:, ~df.columns.str.contains('164')]
 
-    # Rimuovi le colonne con zero valori non nulli
+    # Remove columns with zero non-null values
     df = df.dropna(axis=1, how='all')
 
-    # Filtra i dati fino al 3300-esimo record
+    # Filter data up to the 3300th record
     df = df.loc[:3299]
 
-    # Poiché la colonna timestamp sembra non avere dati validi, dobbiamo generare un timestamp
+    # Generate a timestamp if the timestamp column has no valid data
     df['timestamp'] = range(len(df))
     t = df['timestamp']
 
-    # Separa le colonne in base al suffisso '_z' e '_vx'
-
-    x_vy  =x
-
-    FIND_SHIFTER  =0
+    x_vy = x
+    FIND_SHIFTER = 0
 
     if FIND_SHIFTER:
         mean_diff_s_robot = []
         mean_diff_s_cam = []
         meanss = []
-        for shift_rob in np.arange(0,0.006,0.0001):
+        for shift_rob in np.arange(0, 0.006, 0.0001):
             for shift_cam in np.arange(0, 4, 0.1):
-
-
-                ini, endi = find_signal_boundaries(df["11_vx"],shift_cam)
+                ini, endi = find_signal_boundaries(df["11_vx"], shift_cam)
                 ini_rob, endi_rob = find_signal_boundaries(vy, shift_rob)
 
                 if ini is not None and endi is not None:
-                    # Taglia tutti i segnali del DataFrame utilizzando questi indici
+                    # Trim all signals in the DataFrame using these indices
                     n_df = df.iloc[ini - 2:endi + 3].reset_index(drop=True)
 
                 if ini_rob is not None and endi_rob is not None:
@@ -184,66 +172,52 @@ def merge_dataset_extr_int(x, vy ):
 
                 n_df['timestamp'] = n_df['timestamp'] - n_df['timestamp'].iloc[0]
                 n_x_vy = n_x_vy - n_x_vy[0]
-                # Metodo 1: Utilizzo di slicing
+
+                # Method 1: Using slicing
                 factor = len(n_vy) // len(n_df["11_vx"])
-                # Crea un nuovo asse temporale per il segnale decimato
+
+                # Create a new time axis for the decimated signal
                 x_vy_decimated = np.linspace(n_df["timestamp"].iloc[0], n_df["timestamp"].iloc[-1], len(n_df["11_vx"]))
 
-                # Interpola il segnale n_vy sul nuovo asse temporale
+                # Interpolate the n_vy signal on the new time axis
                 interpolator = interp1d(np.linspace(0, len(n_vy) - 1, len(n_vy)), n_vy, kind='linear')
                 n_vy_decimated = interpolator(np.linspace(0, len(n_vy) - 1, len(n_df["11_vx"])))
                 n_vy = n_vy_decimated
                 n_x_vy = x_vy_decimated
-                _11_esay = (n_df["11_vx"]).tolist()
+
+                _11_esay = n_df["11_vx"].tolist()
                 massimo_segnale2 = max(_11_esay)
-                #print(massimo_segnale2)
                 max1 = max(n_vy)
-                #segnale_normalizzato = [element * massimo_segnale2 / max1 for element in n_vy]
                 segnale_normalizzato = n_vy / max1 * massimo_segnale2
 
                 pointwise_difference = [abs(a - b) for a, b in zip(segnale_normalizzato, _11_esay)]
-                # Converti la lista in un array numpy
                 data_array = np.array(pointwise_difference)
-
-                # Calcola la media ignorando i NaN
                 mean_difference = np.nanmean(data_array)
-
-
 
                 meanss.append(mean_difference)
                 mean_diff_s_robot.append(shift_rob)
                 mean_diff_s_cam.append(shift_cam)
                 print(mean_difference)
 
-                # Metodo 2: Utilizzo di SciPy decimate
+        range_list = np.linspace(0, len(meanss) - 1, len(meanss), dtype=int)
 
-
-
-        range_list = np.linspace(0, len(meanss) - 1, len(meanss), dtype=int)  # Ensure integers
-
-
-
-
-        plt.scatter(range_list,meanss)
+        plt.scatter(range_list, meanss)
         plt.show()
-        # Converti la lista in un array numpy
-        data_array = np.array(meanss)
 
-        # Trova l'indice del valore minimo ignorando i NaN
-        min_index = np.nanargmin(data_array) # Get the index of the maximum value in y
+        data_array = np.array(meanss)
+        min_index = np.nanargmin(data_array)
         thres_robot = mean_diff_s_robot[min_index]
         thres_cam = mean_diff_s_cam[min_index]
-        print(min_index,thres_robot,thres_cam)
+        print(min_index, thres_robot, thres_cam)
     else:
-        thres_robot =  0.0035
+        thres_robot = 0.0035
         thres_cam = 1.0
-
 
     ini, endi = find_signal_boundaries(df["11_vx"], thres_cam)
     ini_rob, endi_rob = find_signal_boundaries(vy, thres_robot)
 
     if ini is not None and endi is not None:
-        # Taglia tutti i segnali del DataFrame utilizzando questi indici
+        # Trim all signals in the DataFrame using these indices
         n_df = df.iloc[ini - 2:endi + 3].reset_index(drop=True)
 
     if ini_rob is not None and endi_rob is not None:
@@ -252,39 +226,27 @@ def merge_dataset_extr_int(x, vy ):
 
     n_df['timestamp'] = n_df['timestamp'] - n_df['timestamp'].iloc[0]
     n_x_vy = n_x_vy - n_x_vy[0]
-    # Metodo 1: Utilizzo di slicing
-    factor = len(n_vy) // len(n_df["11_vx"])
-    # Crea un nuovo asse temporale per il segnale decimato
-    x_vy_decimated = np.linspace(n_df["timestamp"].iloc[0], n_df["timestamp"].iloc[-1], len(n_df["11_vx"]))
 
-    # Interpola il segnale n_vy sul nuovo asse temporale
+    factor = len(n_vy) // len(n_df["11_vx"])
+
+    x_vy_decimated = np.linspace(n_df["timestamp"].iloc[0], n_df["timestamp"].iloc[-1], len(n_df["11_vx"]))
     interpolator = interp1d(np.linspace(0, len(n_vy) - 1, len(n_vy)), n_vy, kind='linear')
     n_vy_decimated = interpolator(np.linspace(0, len(n_vy) - 1, len(n_df["11_vx"])))
     n_vy = n_vy_decimated
     n_x_vy = x_vy_decimated
-    _11_esay = (n_df["11_vx"]).tolist()
+
+    _11_esay = n_df["11_vx"].tolist()
     massimo_segnale2 = max(_11_esay)
-    # print(massimo_segnale2)
     max1 = max(n_vy)
-    # segnale_normalizzato = [element * massimo_segnale2 / max1 for element in n_vy]
     segnale_normalizzato = n_vy / max1 * massimo_segnale2
-
-
-
-
-
-
-
-
-
 
     n_vx_columns = [col for col in n_df.columns if '_vx' in col]
     n_z_columns = [col for col in n_df.columns if '_z' in col]
 
-    # Crea un plot con tre subplot
+    # Create a plot with three subplots
     fig, axs = plt.subplots(3, 1, figsize=(12, 15))
 
-    # Primo subplot per vx_columns
+    # First subplot for vx_columns
     for col in n_vx_columns:
         axs[0].plot(n_df['timestamp'], n_df[col], label=col)
     axs[0].plot(n_df['timestamp'], segnale_normalizzato, label="ROB")
@@ -294,15 +256,15 @@ def merge_dataset_extr_int(x, vy ):
     axs[0].legend()
     axs[0].grid(True)
 
-    # Secondo subplot per vy
+    # Second subplot for vy
     axs[1].plot(n_x_vy, n_vy, label='ROBOT', linestyle='--', color='black')
-    axs[1].set_xlabel('Tempo')
-    axs[1].set_ylabel('Velocità (vy)')
+    axs[1].set_xlabel('Time')
+    axs[1].set_ylabel('Velocity (vy)')
     axs[1].set_title('Ground Truth (vy)')
     axs[1].legend()
     axs[1].grid(True)
 
-    # Terzo subplot per z_columns
+    # Third subplot for z_columns
     for col in n_z_columns:
         axs[2].plot(n_df['timestamp'], n_df[col], label=col)
     axs[2].set_xlabel('Timestamp')
@@ -311,49 +273,66 @@ def merge_dataset_extr_int(x, vy ):
     axs[2].legend()
     axs[2].grid(True)
 
-    # Mostra i plot
+    # Show the plots
     plt.tight_layout()
     plt.show()
 
-
-
-    all_z, all_distance  = calculate_theo_model_and_analyze(n_df, n_vy, 1 , 0.2)
+    all_z, all_distance = calculate_theo_model_and_analyze(n_df, n_vy, 1, 0.2)
     all_z_3, all_distance_3 = calculate_theo_model_and_analyze(n_df, n_vy, 5, 0.23)
 
-
-
-    # Plot delle relazioni
+    # Plot relationships
     plt.figure(figsize=(10, 5))
-    plt.scatter(all_z, all_distance, label='Distance vs VX', alpha=0.5, s = 1)
-    plt.scatter(all_z_3, all_distance_3, label='Distance vs VX media 3', alpha=0.5, s = 1)
+    plt.scatter(all_z, all_distance, label='Distance vs VX', alpha=0.5, s=1)
+    plt.scatter(all_z_3, all_distance_3, label='Distance vs VX mean 3', alpha=0.5, s=1)
     min_val = min(min(all_z), min(all_distance))
     max_val = max(max(all_z), max(all_distance))
-    plt.plot([min_val, max_val], [min_val, max_val], 'r--', label='Perfetta previsione (y = x)')
+    plt.plot([min_val, max_val], [min_val, max_val], 'r--', label='Perfect Prediction (y = x)')
 
-
-
-    #plt.scatter(all_vx, all_z, label='Z vs VX', alpha=0.5)
-    plt.xlabel('reali')
-    plt.ylabel('predetti')
-    plt.title('Relazione tra VX, Distance e Z')
+    plt.xlabel('Real')
+    plt.ylabel('Predicted')
+    plt.title('Relationship between VX, Distance, and Z')
     plt.legend()
-
     plt.grid(True)
     plt.show()
 
 
-
 def modello(x, costante):
+    """
+    The model function for curve fitting.
+
+    Parameters:
+    x (float): The independent variable.
+    costante (float): The constant for the model.
+
+    Returns:
+    float: The dependent variable calculated as costante / x.
+    """
     return costante / x
 
+
 def compute_dz(Vx, Vx_prime, fx, fy, cx, cy):
-    dz = ((Vx * fx) / Vx_prime )
+    """
+    Compute the change in depth (dz) based on optical flow.
 
-    return dz
-
+    Parameters:
+    Vx (float): Velocity in x direction.
+    Vx_prime (float): Derivative of velocity in x direction.
+    fx (float): Focal length in x direction.
+    fy (float): Focal length
+    """
+    dz = ((Vx * fx) / Vx_prime)
 
 @log_function_call
 def windowing_vs_uncertanty(file_path):
+    """
+    Analyze the effect of windowing on the uncertainty of model parameters.
+
+    Parameters:
+    file_path (str): The path to the Excel file containing the data.
+
+    Returns:
+    None
+    """
     SHOW_PLOT = 0
 
     v_ext = []
@@ -361,41 +340,31 @@ def windowing_vs_uncertanty(file_path):
     sigma_gauss = []
     win_size = []
 
-    for window_size in range(1,10,1):
-
-
-        # Elimina il file constant se esiste
+    for window_size in range(1, 10, 1):
+        # Delete the constant file if it exists
         if os.path.exists("constant.txt"):
             os.remove("constant.txt")
 
-        # Crea il file constant con gli header
+        # Create the constant file with headers
         with open("constant.txt", 'w') as file:
             file.write("constant,constant_uncert,velocity\n")
 
-
         data = pd.read_excel(file_path)
-        # Rendi positivi i valori di vx e vx_std
-
-        # Rendi positivi i valori di vx e vx_std
         data['vx'] = abs(data['vx'])
 
-
-        # Rimuovi le righe con zeri o valori mancanti nella riga
+        # Remove rows with zero or missing values
         data = data[(data != 0).all(1)]
 
-        # Dividi il DataFrame in base al valore della colonna vx_3D
-        gruppi = data.groupby('vx_3D')
+        # Split the DataFrame based on the 'vx_3D' column
+        groups = data.groupby('vx_3D')
 
-        # Crea un dizionario di sotto-dataframe, dove ogni chiave è un valore univoco di vx_3D
-        sotto_dataframe = {key: gruppi.get_group(key) for key in gruppi.groups}
+        # Create a dictionary of sub-dataframes, where each key is a unique value of 'vx_3D'
+        sub_dataframes = {key: groups.get_group(key) for key in groups.groups}
 
-        for chiave, valore in sotto_dataframe.items():
-            print(chiave, valore)
-            data = sotto_dataframe[chiave]
+        for key, value in sub_dataframes.items():
+            data = sub_dataframes[key]
 
-
-
-            # Definisci i colori per i diversi valori di vx_3D
+            # Define colors for different values of 'vx_3D'
             color_map = {
                 v1: 'red',
                 v2: 'azure',
@@ -403,208 +372,181 @@ def windowing_vs_uncertanty(file_path):
                 v4: 'orange',
                 v5: 'purple'
             }
-            print(fx,fy,cx,cy)
-
-
 
             x_fps = data['vx']
-
-
-
-
-
             marker_n = data['marker']
             x = [element * 60 for element in x_fps]
-
-
             y = data['z_mean']
 
             SMOOTHING = 1
             window = 0
 
-
             if SMOOTHING:
                 window = 7
                 x_or = x
-                x_s = smoothing(x,marker_n, window_size)
+                x_s = smoothing(x, marker_n, window_size)
                 x_s_graph = [x_ii + 1000 for x_ii in x_s]
                 x = x_s
 
-            #x = media_mobile(x,150)
+            color_p = color_map[key]
 
-
-            color_p = color_map[chiave]
-
-            PLOT_OF_RAW  = 1
+            PLOT_OF_RAW = 1
             if PLOT_OF_RAW and SMOOTHING:
-
-
                 x__1 = list(range(len(x)))
-                #plt.scatter(x__1, x, label='Dati raw', color=color_p, s=35,alpha=0.05,marker ="o",edgecolor ="black")
                 plt.plot(x__1, x_or)
                 plt.plot(x__1, x_s_graph)
-                marker_aug =  [element * 100 for element in marker_n]
-                plt.plot(x__1,marker_aug)
+                marker_aug = [element * 100 for element in marker_n]
+                plt.plot(x__1, marker_aug)
                 if SHOW_PLOT:
                     plt.show()
 
-
-
-            # Vx_prime_values = np.linspace(min(x), max(x), 100)
             Vx_prime_values = sorted(x)
 
+            # Fit the model to the data
+            params, cov = curve_fit(modello, x, y)
 
-            # Adatta il modello ai dati
-            parametri, covarianza = curve_fit(modello, x, y)
+            # Extract the estimated constant
+            estimated_constant = params[0]
 
+            # Calculate the uncertainty associated with the constant
+            constant_uncertainty = np.sqrt(np.diag(cov))[0]
 
-            # Estrai la costante stimata
-            costante_stimata = parametri[0]
+            # Calculate R^2
+            residuals = y - modello(x, estimated_constant)
+            residual_sum_of_squares = np.sum(residuals ** 2)
+            total_sum_of_squares = np.sum((y - np.mean(y)) ** 2)
+            r_squared = 1 - (residual_sum_of_squares / total_sum_of_squares)
 
-            # Calcola l'incertezza associata alla costante
-            incertezza_costante = np.sqrt(np.diag(covarianza))[0]
+            # Calculate the model values for plotting
+            x_model = np.linspace(min(x), max(x), 100)
+            y_model = modello(x_model, estimated_constant)
 
-            # Calcola l'R^2
-            residui = y - modello(x, costante_stimata)
-            somma_quadri_residui = np.sum(residui ** 2)
-            totale = np.sum((y - np.mean(y)) ** 2)
-            r_squared = 1 - (somma_quadri_residui / totale)
-
-            # Calcola i valori del modello per il plotting
-            x_modello = np.linspace(min(x), max(x), 100)
-            y_modello = modello(x_modello, costante_stimata)
-
-            # Salva i dati nel file
-            save_to_file_OF_results("constant.txt", costante_stimata, incertezza_costante, chiave)
+            # Save the data to the file
+            save_to_file_OF_results("constant.txt", estimated_constant, constant_uncertainty, key)
 
             plt.figure(figsize=(15, 10))
 
-            # Grafico dei punti grezzi e del modello
-            plt.scatter(x, y, label='Dati raw', color=color_p, s=35,alpha=0.05,marker ="o",edgecolor ="black")
+            # Plot raw data points and the model
+            plt.scatter(x, y, label='Raw Data', color=color_p, s=35, alpha=0.05, marker="o", edgecolor="black")
 
-
-
-            #MODELLO GENERICO
-
-
-            plt.plot(x_modello, y_modello, label='Modello genereico Dz = k/OF', color='black',linestyle='-.',)
+            # Generic model plot
+            plt.plot(x_model, y_model, label='Generic Model Dz = k/OF', color='black', linestyle='-.')
 
             plt.xlabel('OF [px/s]')
             plt.ylabel('Depth [m]')
             plt.grid(True)
             plt.ylim(0, 2.1)
 
-            # Plot aggiunto
-            Y_teorico = []
+            # Additional plot
+            Y_theoretical = []
             for i in range(len(Vx_prime_values)):
+                dzi = compute_dz(float(key), Vx_prime_values[i], fx, fy, cx, cy)
+                Y_theoretical.append(dzi)
 
+            plt.plot(Vx_prime_values, Y_theoretical, color="grey", label='Theoretical Model Dz = (V_r * fx)/OF')
 
-                dzi = compute_dz(float(chiave), Vx_prime_values[i], fx, fy, cx, cy)
-                Y_teorico.append(dzi)
+            # Calculate systematic error
+            residuals = (y - Y_theoretical) / y
+            systematic_error = np.mean(residuals)
 
-            plt.plot(Vx_prime_values, Y_teorico, color="grey",label='Modello teorico Dz = (V_r * fx)/OF')
+            # Calculate random error
+            random_error = np.std(residuals)
 
-
-            # Calcola l'errore sistematico
-            residui = (y - Y_teorico) / y
-            errore_sistematico = np.mean(residui)
-
-            # Calcola l'errore casuale
-            errore_casuale = np.std(residui)
-            # Calcola i residui
-
-            costante_teorica = fx * float(chiave)
+            theoretical_constant = fx * float(key)
 
             plt.title(
-                f'depth vs Optical flow [z = k / vx] - media mobile filtro :{window}, \n K_th: {costante_teorica:.2f} , K_exp:{costante_stimata:.2f} +- {incertezza_costante:.2f} [px*m]  o [px * m/s] || R^2:{r_squared:.4f} \n Stat on relative residuals (asimptotic - no gaussian): \n epsilon_sistem_REL :  {errore_sistematico*100 :.3f}% , sigma_REL: {errore_casuale*100 :.3f} %')
+                f'depth vs Optical flow [z = k / vx] - moving average filter: {window}, \n K_th: {theoretical_constant:.2f} , K_exp: {estimated_constant:.2f} +- {constant_uncertainty:.2f} [px*m] or [px * m/s] || R^2: {r_squared:.4f} \n Stat on relative residuals (asymptotic - non-gaussian): \n epsilon_system_REL: {systematic_error*100 :.3f}% , sigma_REL: {random_error*100 :.3f} %')
 
-
-            # Posiziona la legenda in alto a destra
+            # Position the legend at the top right
             plt.legend(loc="upper right")
-
-
-
-
-
 
             if SHOW_PLOT:
                 plt.show()
 
             if SHOW_PLOT:
-
-                hist_adv(residui)
+                hist_adv(residuals)
 
             v_ext.append(color_p)
-            unc_k.append(incertezza_costante)
-            sigma_gauss.append(errore_casuale)
+            unc_k.append(constant_uncertainty)
+            sigma_gauss.append(random_error)
             win_size.append(window_size)
 
-
     plt.close('all')
-    # Creazione dei subplot
+
+    # Create subplots
     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(8, 10))
 
-    # Grafico 1: Incertezza associata ai parametri del modello
+    # Plot 1: Uncertainty associated with model parameters
     for i in range(len(v_ext)):
         ax1.scatter(win_size[i], unc_k[i], color=v_ext[i], marker="x", label='Model ' + str(i + 1))
     ax1.set_xlabel('Window Size [samples]')
-    ax1.set_ylabel('k uncertanty [m*px]')
+    ax1.set_ylabel('k uncertainty [m*px]')
 
-
-    # Grafico 2: Sigma del modello fittato (Sigma Gauss)
+    # Plot 2: Sigma of the fitted model (Gaussian Sigma)
     for i in range(len(v_ext)):
         ax2.scatter(win_size[i], sigma_gauss[i], color=v_ext[i], label='Model ' + str(i + 1))
     ax2.set_xlabel('Window Size [samples]')
-    ax2.set_ylabel('relative sigma of residuals [std]')
+    ax2.set_ylabel('Relative sigma of residuals [std]')
 
-    # Imposta il titolo del subplot
-    fig.suptitle('Model Evaluation - moving avarege effect')
+    # Set the title of the subplot
+    fig.suptitle('Model Evaluation - Moving Average Effect')
 
-    # Mostra il plot
+    # Show the plot
     plt.show()
 
-# Funzione per calcolare la distanza euclidea
-
 def calculate_distance_vector(x1, y1, x2_array, y2_array):
+    """
+    Calculate the Euclidean distance between a point and an array of points.
+
+    Parameters:
+    x1 (float): x-coordinate of the point.
+    y1 (float): y-coordinate of the point.
+    x2_array (np.array): Array of x-coordinates of the points.
+    y2_array (np.array): Array of y-coordinates of the points.
+
+    Returns:
+    np.array: Array of distances.
+    """
     return np.sqrt((x1 - x2_array) ** 2 + (y1 - y2_array) ** 2)
+
 
 @log_function_call
 def show_result_ex_file(file_path):
+    """
+    Show and analyze the results from an Excel file.
+
+    Parameters:
+    file_path (str): The path to the Excel file containing the data.
+
+    Returns:
+    None
+    """
     SHOW_PLOT = 1
 
-
-    # Elimina il file constant se esiste
+    # Delete the constant file if it exists
     if os.path.exists("constant.txt"):
         os.remove("constant.txt")
 
-    # Crea il file constant con gli header
+    # Create the constant file with headers
     with open("constant.txt", 'w') as file:
         file.write("constant,constant_uncert,velocity\n")
 
-
     data = pd.read_excel(file_path)
-    # Rendi positivi i valori di vx e vx_std
-
-    # Rendi positivi i valori di vx e vx_std
     data['vx'] = abs(data['vx'])
 
-
-    # Rimuovi le righe con zeri o valori mancanti nella riga
+    # Remove rows with zero or missing values
     data = data[(data != 0).all(1)]
 
-    # Dividi il DataFrame in base al valore della colonna vx_3D
-    gruppi = data.groupby('vx_3D')
+    # Split the DataFrame based on the 'vx_3D' column
+    groups = data.groupby('vx_3D')
 
-    # Crea un dizionario di sotto-dataframe, dove ogni chiave è un valore univoco di vx_3D
-    sotto_dataframe = {key: gruppi.get_group(key) for key in gruppi.groups}
+    # Create a dictionary of sub-dataframes, where each key is a unique value of 'vx_3D'
+    sub_dataframes = {key: groups.get_group(key) for key in groups.groups}
 
-    for chiave, valore in sotto_dataframe.items():
-        print(chiave, valore)
-        data = sotto_dataframe[chiave]
+    for key, value in sub_dataframes.items():
+        data = sub_dataframes[key]
 
-
-
-        # Definisci i colori per i diversi valori di vx_3D
+        # Define colors for different values of 'vx_3D'
         color_map = {
             v1: 'red',
             v2: 'cyan',
@@ -612,128 +554,106 @@ def show_result_ex_file(file_path):
             v4: 'orange',
             v5: 'purple'
         }
-        print(fx,fy,cx,cy)
-
-
 
         x_fps = data['vx']
-
-
-
-
-
         marker_n = data['marker']
         x = [element * 60 for element in x_fps]
-
-
         y = data['z_mean']
 
         SMOOTHING = 0
         window = 0
 
-
         if SMOOTHING:
             window = 3
             x_or = x
-            x_s = smoothing(x,marker_n, window)
+            x_s = smoothing(x, marker_n, window)
             x_s_graph = [x_ii + 1000 for x_ii in x_s]
             x = x_s
 
-        #x = media_mobile(x,150)
+        color_p = color_map[key]
 
-
-        color_p = color_map[chiave]
-
-        PLOT_OF_RAW  = 1
+        PLOT_OF_RAW = 1
         if PLOT_OF_RAW and SMOOTHING:
             x__1 = list(range(len(x)))
-            #plt.scatter(x__1, x, label='Dati raw', color=color_p, s=35,alpha=0.05,marker ="o",edgecolor ="black")
             plt.plot(x__1, x_or)
             plt.plot(x__1, x_s_graph)
-            marker_aug =  [element * 100 for element in marker_n]
-            plt.plot(x__1,marker_aug)
+            marker_aug = [element * 100 for element in marker_n]
+            plt.plot(x__1, marker_aug)
             if SHOW_PLOT:
                 plt.show()
 
-
-
-        # Vx_prime_values = np.linspace(min(x), max(x), 100)
         Vx_prime_values = sorted(x)
 
+        # Fit the model to the data
+        params, cov = curve_fit(modello, x, y)
 
-        # Adatta il modello ai dati
-        parametri, covarianza = curve_fit(modello, x, y)
+        # Extract the estimated constant
+        estimated_constant = params[0]
 
+        # Calculate the uncertainty associated with the constant
+        constant_uncertainty = np.sqrt(np.diag(cov))[0]
 
-        # Estrai la costante stimata
-        costante_stimata = parametri[0]
+        # Calculate R^2
+        residuals = y - modello(x, estimated_constant)
+        residual_sum_of_squares = np.sum(residuals ** 2)
+        total_sum_of_squares = np.sum((y - np.mean(y)) ** 2)
+        r_squared = 1 - (residual_sum_of_squares / total_sum_of_squares)
 
-        # Calcola l'incertezza associata alla costante
-        incertezza_costante = np.sqrt(np.diag(covarianza))[0]
+        # Calculate the model values for plotting
+        x_model = np.linspace(min(x), max(x), len(x))
+        y_model = modello(x_model, estimated_constant)
 
-        # Calcola l'R^2
-        residui = y - modello(x, costante_stimata)
-        somma_quadri_residui = np.sum(residui ** 2)
-        totale = np.sum((y - np.mean(y)) ** 2)
-        r_squared = 1 - (somma_quadri_residui / totale)
+        # Save the data to the file
+        save_to_file_OF_results("constant.txt", estimated_constant, constant_uncertainty, key)
 
-        # Calcola i valori del modello per il plotting
-        x_modello = np.linspace(min(x), max(x), len(x))
-        y_modello = modello(x_modello, costante_stimata)
-
-        # Salva i dati nel file
-        save_to_file_OF_results("constant.txt", costante_stimata, incertezza_costante, chiave)
-
-        # Creazione del grafico
+        # Create the plot
         plt.figure(figsize=(12, 6))
 
-        # Plot aggiunto
-        Y_teorico = []
+        # Additional plot
+        Y_theoretical = []
         for i in range(len(Vx_prime_values)):
-            dzi = compute_dz(float(chiave), Vx_prime_values[i], fx, fy, cx, cy)
-            Y_teorico.append(dzi)
+            dzi = compute_dz(float(key), Vx_prime_values[i], fx, fy, cx, cy)
+            Y_theoretical.append(dzi)
 
-        # Calcolo della distanza minima per ogni punto sperimentale
+        # Calculate the minimum distance for each experimental point
         min_distances = []
-        # Creazione del DataFrame
         data = pd.DataFrame({
             'x': x,
             'y': y
         })
-        modello_q = pd.DataFrame({
-            'x_modello': x_modello,
-            'y_modello': y_modello
+        model_df = pd.DataFrame({
+            'x_model': x_model,
+            'y_model': y_model
         })
 
         for index, row in data.iterrows():
-            distances = calculate_distance_vector(row['x'], row['y'], modello_q['x_modello'].values,
-                                                  modello_q['y_modello'].values)
+            distances = calculate_distance_vector(row['x'], row['y'], model_df['x_model'].values,
+                                                  model_df['y_model'].values)
             min_distance = np.min(distances)
             min_distances.append(min_distance)
 
         data['min_distance'] = min_distances
 
-        # Visualizzazione dei risultati
+        # Display the results
         print(data[['x', 'y', 'min_distance']])
 
-        # Calcolo dell'errore medio assoluto (MAE)
+        # Calculate the mean absolute error (MAE)
         mae = np.mean(min_distances)
-        print(f'Errore medio assoluto: {mae:.4f}')
+        print(f'Mean Absolute Error: {mae:.4f}')
 
-
-        # Preparazione dei dati
+        # Prepare the data
         data = pd.DataFrame({
             'x': x,
             'y': y,
-            'x_modello': x_modello,
-            'y_modello': y_modello,
+            'x_model': x_model,
+            'y_model': y_model,
             'Vx_prime_values': Vx_prime_values,
-            'Y_teorico' : Y_teorico
+            'Y_theoretical': Y_theoretical
         })
 
         sns.set_theme(style="whitegrid")
         plt.rcParams.update({
-            'font.family': 'Nimbus Sans',  # Puoi cambiare 'DejaVu Sans' con il font desiderato
+            'font.family': 'Nimbus Sans',
             'font.size': 12,
             'axes.titlesize': 18,
             'axes.titleweight': 'bold',
@@ -742,13 +662,12 @@ def show_result_ex_file(file_path):
             'ytick.labelsize': 12
         })
 
-        # Grafico dei punti grezzi e del modello
-        sns.scatterplot(x='x', y='y', data=data, label='Dati grezzi', color=color_p, s=50, alpha=0.7, marker="^",
+        # Plot raw data points and the model
+        sns.scatterplot(x='x', y='y', data=data, label='Raw Data', color=color_p, s=50, alpha=0.7, marker="^",
                         edgecolor="black")
-
-        sns.lineplot(x='x_modello', y='y_modello', data=data, label=r'Experimental model $d = k_{{exp}}/v_{{px}}$',
+        sns.lineplot(x='x_model', y='y_model', data=data, label=r'Experimental model $d = k_{{exp}}/v_{{px}}$',
                      color='black', linestyle='-.')
-        sns.lineplot(x='Vx_prime_values', y='Y_teorico', data=data, color="grey",
+        sns.lineplot(x='Vx_prime_values', y='Y_theoretical', data=data, color="grey",
                      label=r'Analytical model $d = V_{{ext}} ⋅ f_{{y}}/v_{{px}}$', alpha=0.7, linewidth=2)
 
         plt.xlabel(r'$v_{px}$ [$px/s$]', fontsize=16)
@@ -758,222 +677,297 @@ def show_result_ex_file(file_path):
         plt.yticks(fontsize=14)
         plt.grid(True, which='both', linestyle='--', linewidth=0.5)
 
-        # Calcola l'errore sistematico
-        residui = (data['y'] - data['Y_teorico']) / data['y']
-        errore_sistematico = np.mean(residui)
+        # Calculate systematic error
+        residuals = (data['y'] - data['Y_theoretical']) / data['y']
+        systematic_error = np.mean(residuals)
 
-        # Calcola l'errore casuale
-        errore_casuale = np.std(residui)
+        # Calculate random error
+        random_error = np.std(residuals)
 
-        costante_teorica = fx * float(chiave)
+        theoretical_constant = fx * float(key)
 
-        # Titolo del grafico
-        plt.title(
-            f' Optical pixel displacement vs. depth. Performed at $V_{{ext}}$ = {chiave} m/s ',
-            fontsize=18, fontweight='bold', pad=15)
+        # Plot title
+        plt.title(f'Optical pixel displacement vs. depth. Performed at $V_{{ext}}$ = {key} m/s', fontsize=18,
+                  fontweight='bold', pad=15)
 
-        # Posiziona la legenda in alto a destra
+        # Position the legend at the top right
         plt.legend(loc="upper right", fontsize=14)
 
-        # Percorso del file di salvataggio
-        file_path_fig = 'results/speed_' + str(chiave) + '_k_model.png'
+        # Path to save the file
+        file_path_fig = 'results/speed_' + str(key) + '_k_model.png'
 
-        # Verifica se il file esiste già
+        # Check if the file already exists
         if os.path.exists(file_path_fig):
-            # Se il file esiste, eliminilo
+            # If the file exists, delete it
             os.remove(file_path_fig)
-            print("removed old plot")
+            print("Removed old plot")
 
-        # Salva la figura
+        # Save the figure
         plt.savefig(file_path_fig, dpi=300, bbox_inches='tight')
-
 
         if SHOW_PLOT:
             plt.show()
 
+
 @log_function_call
 def constant_analisis():
-    # Leggi i dati dal file
+    """
+    Analyze the constant values extracted from the model evaluation at different reference external speeds.
+
+    Parameters:
+    None
+
+    Returns:
+    None
+    """
+    # Read data from the file
     data = np.loadtxt("constant.txt", delimiter=',', skiprows=1)
 
-    # Estrai le colonne
+    # Extract columns
     constant_data = data[:, 0]
     constant_uncert_data = data[:, 1]
     velocity_data = data[:, 2]
 
-    # Fai la regressione lineare tenendo conto dell'incertezza sulla costante
-    slope, intercept, r_squared = weighted_linregress_with_error_on_y(velocity_data, constant_data, 1 / constant_uncert_data)
-    # Calcola l'incertezza della pendenza
+    # Perform linear regression considering the uncertainty on the constant
+    slope, intercept, r_squared = weighted_linregress_with_error_on_y(velocity_data, constant_data,
+                                                                      1 / constant_uncert_data)
+
+    # Calculate the uncertainty of the slope
     residuals = constant_data - (slope * velocity_data + intercept)
-    uncert_slope = np.sqrt(np.sum(constant_uncert_data ** 2 * residuals ** 2) / np.sum((velocity_data - np.mean(velocity_data)) ** 2))
-    # Calcola l'R^2
+    uncert_slope = np.sqrt(
+        np.sum(constant_uncert_data ** 2 * residuals ** 2) / np.sum((velocity_data - np.mean(velocity_data)) ** 2))
 
     sigma3 = [element * 3 for element in constant_uncert_data]
 
     plt.figure(figsize=(12, 7))
-    # Grafico
-    plt.scatter(velocity_data, constant_data, label='Dati',s = 15)
-    plt.errorbar(velocity_data, constant_data, yerr=sigma3, fmt='none', label='Incertezza')
-    plt.plot(velocity_data, slope * velocity_data + intercept, color='red', label='k(v_ext) sperimentale')
-    plt.plot(velocity_data, velocity_data* fx, color='orange', label='K(v_ext) teorico')
-    plt.xlabel('V_ext[m/s]')
+
+    # Plot
+    plt.scatter(velocity_data, constant_data, label='Data', s=15)
+    plt.errorbar(velocity_data, constant_data, yerr=sigma3, fmt='none', label='Uncertainty')
+    plt.plot(velocity_data, slope * velocity_data + intercept, color='red', label='Experimental k(v_ext)')
+    plt.plot(velocity_data, velocity_data * fx, color='orange', label='Theoretical K(v_ext)')
+    plt.xlabel('V_ext [m/s]')
     plt.ylabel('Constant [k]')
     plt.title(
-        f' k_i = f(v_ext) : slope:{slope:.1f} sigma:{uncert_slope:.1f} k/[m/s]|| R^2:{r_squared:.4f} \n incertezza su parametri: {constant_uncert_data[0]:.2f} , {constant_uncert_data[1]:.2f},{constant_uncert_data[2]:.2f},{constant_uncert_data[3]:.2f} [px*m] - 99.7% int')
+        f'k_i = f(v_ext) : slope: {slope:.1f} sigma: {uncert_slope:.1f} k/[m/s] || R^2: {r_squared:.4f} \nUncertainty on parameters: {constant_uncert_data[0]:.2f}, {constant_uncert_data[1]:.2f}, {constant_uncert_data[2]:.2f}, {constant_uncert_data[3]:.2f} [px*m] - 99.7% int')
     plt.legend()
     plt.grid(True)
 
-
-
-    # Percorso del file di salvataggio
+    # Path to save the figure
     file_path_fig = 'results/k_LR.png'
 
-    # Verifica se il file esiste già
+    # Check if the file already exists
     if os.path.exists(file_path_fig):
-        # Se il file esiste, eliminilo
+        # If the file exists, delete it
         os.remove(file_path_fig)
-        print("removed old plot")
+        print("Removed old plot")
 
-    # Salva la figura
+    # Save the figure
     plt.savefig(file_path_fig)
     plt.show()
 
-
-
 def interpolate_signal(signal_ref, timestamps_ref, signal_other, timestamps_other):
-    # Interpolazione del segnale
+    """
+    Interpolate a signal to match the reference timestamps.
+
+    Parameters:
+    signal_ref (np.array): Reference signal.
+    timestamps_ref (np.array): Timestamps for the reference signal.
+    signal_other (np.array): Signal to be interpolated.
+    timestamps_other (np.array): Timestamps for the signal to be interpolated.
+
+    Returns:
+    np.array: Interpolated signal.
+    """
+    # Interpolate the signal
     interpolated_signal_other = np.interp(timestamps_ref, timestamps_other, signal_other)
     return interpolated_signal_other
+
 def plot_increment(file_path, label):
-    # Leggi i dati dal file CSV
+    """
+    Plot the increment of translation in the X direction normalized to meters per second.
+
+    Parameters:
+    file_path (str): The path to the CSV file containing the data.
+    label (str): The label for the plot.
+
+    Returns:
+    None
+    """
+    # Read the data from the CSV file
     data = pd.read_csv(file_path, delimiter=",")
 
-    # Estrai il timestamp minimo
+    # Extract the minimum timestamp
     min_timestamp = data['__time'].min()
 
-    # Calcola i timestamp relativi a zero
+    # Calculate the timestamps relative to zero
     timestamps = data['__time'] - min_timestamp
 
-    # Estrai i dati relativi alla traslazione X
+    # Extract the data for the translation in the X direction
     translation_x = data['/tf/base/tool0_controller/translation/x']
 
-    # Calcola l'incremento della traslazione X
+    # Calculate the increment of the translation in the X direction
     translation_increment = translation_x.diff()
 
-    # Calcola l'intervallo temporale tra i punti
+    # Calculate the time interval between points
     time_diff = timestamps.diff()
 
-    # Calcola la velocità in metri al secondo
+    # Calculate the velocity in meters per second
     velocity_mps = translation_increment / time_diff
 
-    # Plot dell'incremento di traslazione X normalizzato in metri al secondo
+    # Plot the increment of translation in the X direction normalized to meters per second
     plt.plot(timestamps[1:], velocity_mps[1:], label=label)
 
 def iter_mp4_files(directory):
-    # Itera su tutti i file e le directory nella directory specificata
+    """
+    Iterate through all files and directories in the specified directory to find MP4 files.
+
+    Parameters:
+    directory (str): The path to the directory to search for MP4 files.
+
+    Yields:
+    str: The full path to each MP4 file found.
+    """
+    # Iterate through all files and directories in the specified directory
     for root, dirs, files in os.walk(directory):
-        # Itera su tutti i file
+        # Iterate through all files
         for file in files:
-            # Verifica se il file ha estensione MP4
+            # Check if the file has an MP4 extension
             if file.endswith('.MP4'):
-                # Restituisce il percorso completo del file MP4
+                # Return the full path of the MP4 file
                 print(os.path.join(root, file))
                 yield os.path.join(root, file)
 
 @log_function_call
 def convert_position_to_speed():
-    # Ottieni la directory corrente
+    """
+    Convert position data to speed data by calculating the increments in 'vx' columns from CSV files.
+
+    Parameters:
+    None
+
+    Returns:
+    None
+    """
+    # Get the current directory
     current_directory = os.getcwd()
 
-    # Trova tutti i file che iniziano con "raw_re_output_" nella directory corrente
+    # Find all files starting with "raw_re_output_" in the current directory
     matching_files = [file for file in os.listdir(current_directory) if file.startswith("raw_re_output_")]
 
-    # Itera su ciascun file trovato
+    # Iterate through each file found
     for file in matching_files:
         file_path = os.path.join(current_directory, file)
-        print("File trovato:", file_path)
-        # Leggi il file CSV
+        print("Found file:", file_path)
+        # Read the CSV file
         df = pd.read_csv(file_path)
-        # Crea un DataFrame vuoto per gli incrementi di "vx"
-        df_incrementi = pd.DataFrame(columns=df.columns)
+        # Create an empty DataFrame for 'vx' increments
+        df_increments = pd.DataFrame(columns=df.columns)
 
-        # Calcola gli incrementi per ciascuna colonna di "vx"
+        # Calculate the increments for each 'vx' column
         for col in df.columns:
             if '_vx' in col:
-                incrementi = df[col].diff().abs()  # Calcola gli incrementi
-                df_incrementi[col] = incrementi  # Assegna gli incrementi al DataFrame degli incrementi
+                increments = df[col].diff().abs()  # Calculate the increments
+                df_increments[col] = increments  # Assign the increments to the increments DataFrame
 
-        # Plot dei valori di "vx" originali
+        # Plot the original 'vx' values
         plt.figure(figsize=(10, 6))
         for col in df.columns:
             if '_vx' in col:
-                plt.scatter(df['timestamp'], df[col], label=col, s = 2)
-                plt.title("originale")
+                plt.scatter(df['timestamp'], df[col], label=col, s=2)
+                plt.title("Original")
 
-        # Mantieni solo le colonne relative a "z" nel DataFrame originale
+        # Keep only the 'z' columns in the original DataFrame
         df_z = df[[col for col in df.columns if '_z' in col]]
 
-        # Combina df_incrementi con le colonne di "z"
-        df_combined = pd.concat([df_z, df_incrementi], axis=1)
+        # Combine df_increments with the 'z' columns
+        df_combined = pd.concat([df_z, df_increments], axis=1)
 
-        # Salva il DataFrame combinato in un nuovo file CSV
-        file_path_of = os.path.join(current_directory, "of_"+file)
+        # Save the combined DataFrame to a new CSV file
+        file_path_of = os.path.join(current_directory, "of_" + file)
         df_combined.to_csv(file_path_of, index=False)
 
-        # Plot degli incrementi di "vx"
+        # Plot the 'vx' increments
         plt.figure(figsize=(10, 6))
-        for col in df_incrementi.columns:
-            plt.scatter(df['timestamp'], df_incrementi[col], label=col + ' Increment', s = 2)
+        for col in df_increments.columns:
+            plt.scatter(df['timestamp'], df_increments[col], label=col + ' Increment', s=2)
 
-        # Impostazioni dei plot
+        # Plot settings
         plt.xlabel('Timestamp')
-        plt.ylabel('Valore di vx')
-        plt.title('Valori di vx e relativi incrementi in funzione del timestamp')
+        plt.ylabel('vx Value')
+        plt.title('vx Values and their Increments as a Function of Timestamp')
         plt.legend()
         plt.grid(True)
 
-        # Mostra i plot
+        # Show the plots
         plt.show()
 
-
-        #df.to_csv(file_path, index=False)
-
-# Funzione per shiftare un segnale di un certo offset temporale
+# Function to shift a signal by a certain time offset
 def shift_signal(signal, timestamps, offset):
+    """
+    Shift a signal by a certain time offset.
+
+    Parameters:
+    signal (np.array): The signal to be shifted.
+    timestamps (np.array): The timestamps corresponding to the signal.
+    offset (float): The time offset to shift the signal by.
+
+    Returns:
+    np.array: The shifted signal.
+    """
     return np.interp(timestamps + offset, timestamps, signal)
+
 def interpole_linear(common_timestamp, y1):
-    # Creare una funzione di interpolazione lineare
+    """
+    Perform linear interpolation on a signal to generate a finer resolution.
+
+    Parameters:
+    common_timestamp (np.array): The common timestamps for the signal.
+    y1 (np.array): The signal values to be interpolated.
+
+    Returns:
+    np.array, np.array: The new timestamps and the interpolated signal.
+    """
+    # Create a linear interpolation function
     f_linear = interp1d(common_timestamp, y1, kind='linear')
-    # Generare nuovi punti x per l'interpolazione con un passo fine
-    common_timestamp = np.linspace(min(common_timestamp), max(common_timestamp), num=10000)  # 1000 punti per maggiore continuità
+    # Generate new x points for interpolation with a finer step
+    common_timestamp = np.linspace(min(common_timestamp), max(common_timestamp), num=10000)  # 10000 points for higher continuity
     y1 = f_linear(common_timestamp)
-    # Verifica che x_new e y_linear abbiano la stessa lunghezza
+    # Ensure that the new timestamps and interpolated signal have the same length
     assert len(common_timestamp) == len(y1)
     return common_timestamp, y1
 
 @log_function_call
 def synchro_data_v_v_e_z(file_raw_optics):
-    # Plot di tutti e tre i file CSV
+    """
+    Synchronize and plot velocity and translation data from multiple CSV files.
+
+    Parameters:
+    file_raw_optics (str): Path to the raw optics file.
+
+    Returns:
+    tuple: Synchronized timestamps and smoothed velocity data.
+    """
+    # Plot of all three CSV files
     # plot_increment("data_robot_encoder/1b.csv", label='1b')
     # plot_increment("data_robot_encoder/2b.csv", label='2b')
     # plot_increment("data_robot_encoder/4b.csv", label='4b')
 
-    # # Impostazioni del plot
-    # plt.title('Incremento di Traslazione X normalizzato in metri al secondo')
-    # plt.xlabel('Tempo [s]')
-    # plt.ylabel('Velocità [m/s]')
+    # Plot settings
+    # plt.title('Translation X increment normalized to meters per second')
+    # plt.xlabel('Time [s]')
+    # plt.ylabel('Velocity [m/s]')
     # plt.legend()
     # plt.grid(True)
     #
-    # # Mostra il grafico
     # plt.show()
 
-    # Leggi i dati dai file CSV
+    # Read data from CSV files
     data_1b = pd.read_csv("data_robot_encoder/1b.csv", delimiter=",")
     data_2b = pd.read_csv("data_robot_encoder/2b.csv", delimiter=",")
     data_4b = pd.read_csv("data_robot_encoder/4b.csv", delimiter=",")
 
-    # Estrai i segnali relativi alla traslazione X e i timestamp
+    # Extract translation X signals and timestamps
     translation_x_2b = data_2b['/tf/base/tool0_controller/translation/x']
     timestamps_2b = data_2b['__time']
 
@@ -983,20 +977,17 @@ def synchro_data_v_v_e_z(file_raw_optics):
     translation_x_4b = data_4b['/tf/base/tool0_controller/translation/x']
     timestamps_4b = data_4b['__time']
 
-    # Trova il timestamp iniziale del primo segnale
+    # Find the initial timestamp of the first signal
     start_time_1b = timestamps_1b[0]
 
-    # Sottrai il timestamp iniziale dal timestamp del secondo segnale
+    # Subtract the initial timestamp from the second signal's timestamps
     timestamps_2b_shifted = timestamps_2b - start_time_1b
 
-    # Sottrai il timestamp iniziale dal timestamp del terzo segnale
+    # Subtract the initial timestamp from the third signal's timestamps
     timestamps_4b_shifted = timestamps_4b - start_time_1b
 
-    # Calcola la differenza assoluta istante per istante tra i tre segnali
+    # Calculate the absolute difference between the three signals at each time step
     difference_signal = np.abs(translation_x_2b - translation_x_1b) + np.abs(translation_x_4b - translation_x_1b)
-
-
-
 
     FIND_SHIFTER = 0
     if FIND_SHIFTER:
@@ -1004,30 +995,25 @@ def synchro_data_v_v_e_z(file_raw_optics):
         sh_1 = []
         sh_2 = []
 
-
-
-        for shift_1 in np.arange(-2,2,0.1):
+        for shift_1 in np.arange(-2, 2, 0.1):
             for shift_2 in np.arange(-2, 2, 0.1):
-
-                # Shifta i segnali 2 e 4
+                # Shift signals 2 and 4
                 shifted_signal_2b = shift_signal(translation_x_2b, timestamps_2b, shift_1)
                 shifted_signal_4b = shift_signal(translation_x_4b, timestamps_4b, shift_2)
 
-
-
-                # Determina la lunghezza minima tra i due segnali
+                # Determine the minimum length between the two signals
                 min_length = min(len(shifted_signal_2b), len(translation_x_1b), len(shifted_signal_4b))
 
-                # Ritaglia la fine del segnale più lungo per farlo coincidere con la lunghezza del segnale più corto
+                # Trim the end of the longer signal to match the shorter signal's length
                 shifted_signal_2b = shifted_signal_2b[:min_length]
                 shifted_signal_4b = shifted_signal_4b[:min_length]
                 translation_x_1b = translation_x_1b[:min_length]
 
-                # Calcola la differenza assoluta istante per istante tra i segnali shiftati
+                # Calculate the absolute difference between the shifted signals at each time step
                 difference_signal_shifted = np.abs(shifted_signal_2b - translation_x_1b) + np.abs(
                     shifted_signal_4b - translation_x_1b)
 
-                # Calcola la differenza media su tutto il tempo tra i tre segnali
+                # Calculate the mean difference over the entire time between the three signals
                 mean_difference = np.mean(difference_signal_shifted)
 
                 print(mean_difference)
@@ -1037,48 +1023,46 @@ def synchro_data_v_v_e_z(file_raw_optics):
 
         serie_valori = [i + 1 for i in range(len(res_shift))]
 
-
-        # #Plotta la differenza tra i segnali shiftati
-        # plt.scatter(serie_valori,res_shift)
-        # #plt.scatter(serie_valori,sh_1)
-        # #plt.scatter(serie_valori,sh_2)
-        # plt.xlabel('Tempo')
-        # plt.ylabel('Differenza assoluta')
-        # plt.title('Differenza assoluta tra i segnali shiftati')
+        # Plot the difference between the shifted signals
+        # plt.scatter(serie_valori, res_shift)
+        # plt.scatter(serie_valori, sh_1)
+        # plt.scatter(serie_valori, sh_2)
+        # plt.xlabel('Time')
+        # plt.ylabel('Absolute difference')
+        # plt.title('Absolute difference between shifted signals')
         # plt.show()
 
-        indice_minimo = res_shift.index(min(res_shift))
-        print("shift 1 e 2", sh_1[indice_minimo], sh_2[indice_minimo])
-        s11 = sh_1[indice_minimo]
-        s22 = sh_2[indice_minimo]
+        min_index = res_shift.index(min(res_shift))
+        print("Shift 1 and 2", sh_1[min_index], sh_2[min_index])
+        s11 = sh_1[min_index]
+        s22 = sh_2[min_index]
 
     else:
-
         s11 = -0.99999999999
         s22 = -0.59999999999
 
-    # Shifta i segnali 2 e 4
+    # Shift signals 2 and 4
     shifted_signal_2b = shift_signal(translation_x_2b, timestamps_2b, s11)
     shifted_signal_4b = shift_signal(translation_x_4b, timestamps_4b, s22)
 
-    # Determina la lunghezza minima tra i due segnali
+    # Determine the minimum length between the two signals
     min_length = min(len(shifted_signal_2b), len(translation_x_1b), len(shifted_signal_4b))
 
-    # Ritaglia la fine del segnale più lungo per farlo coincidere con la lunghezza del segnale più corto
+    # Trim the end of the longer signal to match the shorter signal's length
     shifted_signal_2b = shifted_signal_2b[:min_length]
     shifted_signal_4b = shifted_signal_4b[:min_length]
     translation_x_1b = translation_x_1b[:min_length]
 
-    # Trova la lunghezza minima tra tutti i segnali
+    # Find the minimum length between all signals
     min_length = min(len(translation_x_1b), len(shifted_signal_2b), len(shifted_signal_4b))
 
-    # Calcola il passo temporale originale
+    # Calculate the original time step
     time_step = timestamps_1b.diff().mean()
 
-    # Crea una nuova timestamp basata sul passo temporale originale
+    # Create a new timestamp based on the original time step
     common_timestamp = np.arange(0, min_length * time_step, time_step)
 
-    # Plotta i segnali condividendo lo stesso asse x
+    # Plot the signals sharing the same x-axis
     y1 = translation_x_1b[:min_length]
     y2 = shifted_signal_2b[:min_length]
     y3 = shifted_signal_4b[:min_length]
@@ -1090,209 +1074,224 @@ def synchro_data_v_v_e_z(file_raw_optics):
     y2_series = pd.Series(y2)
     y3_series = pd.Series(y3)
 
-    # Interpolare i valori NaN
+    # Interpolate NaN values
     y1_interpolated = y1_series.interpolate(method='linear')
     y2_interpolated = y2_series.interpolate(method='linear')
     y3_interpolated = y3_series.interpolate(method='linear')
 
-    # Calcola la media dei tre segnali interpolati
-    posizione_media = np.nanmean(np.vstack([y1_interpolated, y2_interpolated, y3_interpolated]), axis=0)
+    # Calculate the mean of the three interpolated signals
+    mean_position = np.nanmean(np.vstack([y1_interpolated, y2_interpolated, y3_interpolated]), axis=0)
 
-    velocita_media = np.diff(posizione_media) / np.diff(common_timestamp)
+    mean_velocity = np.diff(mean_position) / np.diff(common_timestamp)
 
-    # Applica una media mobile di 3 elementi al segnale di velocità
+    # Apply a 20-element moving average to the velocity signal
     window_size = 20
-    velocita_media_smoothed = np.convolve(velocita_media, np.ones(window_size) / window_size, mode='valid')
+    mean_velocity_smoothed = np.convolve(mean_velocity, np.ones(window_size) / window_size, mode='valid')
 
-    # Calcola la nuova lunghezza per il tempo per adattarla alla media mobile
-    x_velocita = common_timestamp[1:]  # I timestamp per la velocità sono ridotti di 1 rispetto a x originale
-    x_smoothed = x_velocita[window_size - 1:]  #
+    # Calculate the new length for time to match the moving average
+    x_velocity = common_timestamp[1:]  # The timestamps for velocity are reduced by 1 compared to the original x
+    x_smoothed = x_velocity[window_size - 1:]  #
 
-    velocita_media_smoothed_series = pd.Series(velocita_media_smoothed)
-    velocita_media_smoothed_interpolated = velocita_media_smoothed_series.interpolate(method='linear').to_numpy()
+    mean_velocity_smoothed_series = pd.Series(mean_velocity_smoothed)
+    mean_velocity_smoothed_interpolated = mean_velocity_smoothed_series.interpolate(method='linear').to_numpy()
 
-    plt.scatter(x_smoothed, velocita_media_smoothed_interpolated, label='Velocità media filtrata', s=3)
-    # plt.scatter(common_timestamp, posizione_media, label='Segnale 1', s=1)
-    # plt.scatter(common_timestamp, y2, label='Segnale 1', s=1)
-    # plt.scatter(common_timestamp, y3, label='Segnale 1', s=1)
+    plt.scatter(x_smoothed, mean_velocity_smoothed_interpolated, label='Smoothed Mean Velocity', s=3)
+    # plt.scatter(common_timestamp, mean_position, label='Signal 1', s=1)
+    # plt.scatter(common_timestamp, y2, label='Signal 1', s=1)
+    # plt.scatter(common_timestamp, y3, label='Signal 1', s=1)
 
-    plt.xlabel('Tempo')
-    plt.ylabel('Valore del segnale')
-    plt.title('Segnali condivisi sull\'asse x')
+    plt.xlabel('Time')
+    plt.ylabel('Signal Value')
+    plt.title('Signals sharing the x-axis')
     plt.legend()
     plt.show()
 
-
-    #
-
-    return x_smoothed,velocita_media_smoothed_interpolated
-
-
+    return x_smoothed, mean_velocity_smoothed_interpolated
 
 def media_mobile(lista, window_size):
     """
-    Calcola la media mobile di una lista data_robot_encoder una finestra di dimensione window_size.
+    Calculate the moving average of a list with a specified window size.
 
-    :param lista: La lista di valori.
-    :param window_size: La dimensione della finestra per il calcolo della media mobile.
-    :return: La lista dei valori della media mobile.
+    Parameters:
+    lista (list): The list of values.
+    window_size (int): The window size for calculating the moving average.
+
+    Returns:
+    list: The list of moving average values.
     """
     lista = np.array(lista)
-    padding = window_size // 2  # Calcolo del padding necessario per mantenere la stessa lunghezza dell'input
-    lista_padded = np.pad(lista, (padding, padding), mode='edge')  # Padding con il primo/ultimo valore per mantenere la stessa lunghezza
+    padding = window_size // 2  # Calculate the padding needed to maintain the same length as the input
+    lista_padded = np.pad(lista, (padding, padding), mode='edge')  # Padding with the first/last value to maintain the same length
     moving_avg = np.convolve(lista_padded, np.ones(window_size) / window_size, mode='valid')
-    return moving_avg[:len(lista)]  # Rimuove gli elementi in eccesso per mantenere la stessa lunghezza dell'input
-
-
+    return moving_avg[:len(lista)]  # Remove excess elements to maintain the same length as the input
 def smoothing(x_fps, marker_n, window_size):
-    data = x_fps
     """
-      Funzione che suddivide una lista in sottoliste basandosi sul cambio di marker ID e le riassembla mantenendo l'ordine originale.
+    Function that splits a list into sublists based on marker ID changes and reassembles them while maintaining the original order.
 
-      Argomenti:
-        data_robot_encoder: Lista di dati da suddividere e riassemblare.
-        marker_n: Lista di marker ID corrispondenti ai dati.
+    Parameters:
+    x_fps (list): List of data to be split and reassembled.
+    marker_n (list): List of marker IDs corresponding to the data.
+    window_size (int): The window size for applying the moving average.
 
-      Restituisce:
-        Lista riassemblata con i dati in ordine originale.
-      """
-
-    sublists = []  # Lista per memorizzare le sottoliste
-    current_sublist = []  # Lista temporanea per la sottolista corrente
-    current_marker = None  # Marker ID corrente
+    Returns:
+    list: Reassembled list with data in the original order.
+    """
+    data = x_fps
+    sublists = []  # List to store sublists
+    current_sublist = []  # Temporary list for the current sublist
+    current_marker = None  # Current marker ID
 
     for i, (datum, marker) in enumerate(zip(data, marker_n)):
-        # Controlla il cambio di marker
+        # Check for marker change
         if current_marker != marker:
-
-            #print("Spezzato")
-            #modifica sublist
-            #print(current_sublist)
-            #print(current_sublist)
             if len(current_sublist) > window_size:
-
-                print(len(current_sublist))
                 current_sublist = media_mobile(current_sublist, window_size)
-                print(len(current_sublist))
-
-
             sublists.append(current_sublist)
             current_sublist = []
             current_marker = marker
 
-        # Aggiungi il dato alla sottolista corrente
+        # Add data to the current sublist
         current_sublist.append(datum)
 
-    # Gestisce l'ultima sottolista (se presente)
+    # Handle the last sublist (if present)
     if current_sublist:
-        print("Spezzato")
         sublists.append(current_sublist)
 
-    # Riassembla i dati in ordine originale
+    # Reassemble the data in the original order
     reassembled_data = []
     for sublist in sublists:
         reassembled_data.extend(sublist)
 
     return reassembled_data
 
-
 def hist_adv(residui):
-    # Calcola l'errore sistematico
+    """
+    Plot an advanced histogram of residuals with a Gaussian distribution overlay.
+
+    Parameters:
+    residui (np.array): Array of residuals.
+
+    """
+    # Calculate systematic error
     errore_sistematico = np.mean(residui)
 
-    # Calcola l'errore casuale
+    # Calculate random error
     errore_casuale = np.std(residui)
 
-    # Plotta l'istogramma dei residui
+    # Plot the histogram of residuals
     plt.hist(residui, bins=30, color='skyblue', edgecolor='black', density=True, alpha=0.6)
 
-    # Calcola la deviazione standard della distribuzione gaussiana
+    # Calculate the standard deviation of the Gaussian distribution
     sigma_standard = np.std(residui)
 
-    # Crea un array di valori x per la distribuzione gaussiana
+    # Create an array of x values for the Gaussian distribution
     x_gauss = np.linspace(np.min(residui), np.max(residui), 100)
 
-    # Calcola i valori y corrispondenti alla distribuzione gaussiana
+    # Calculate the y values corresponding to the Gaussian distribution
     y_gauss = norm.pdf(x_gauss, np.mean(residui), np.std(residui))
 
-    # Plotta la distribuzione gaussiana sopra l'istogramma dei residui
-    plt.plot(x_gauss, y_gauss, 'r--', label='Distribuzione Gaussiana')
+    # Plot the Gaussian distribution over the histogram of residuals
+    plt.plot(x_gauss, y_gauss, 'r--', label='Gaussian Distribution')
 
-    # Plotta le linee verticali corrispondenti alla deviazione standard
+    # Plot vertical lines corresponding to the standard deviation
     plt.axvline(x=errore_sistematico + errore_casuale, color='k', linestyle='--', linewidth=1)
     plt.axvline(x=errore_sistematico - errore_casuale, color='k', linestyle='--', linewidth=1)
-    # Aggiungi una linea verticale corrispondente al valore medio dei residui
+    # Add a vertical line corresponding to the mean value of the residuals
     plt.axvline(x=np.mean(residui), color='g', linestyle='-', linewidth=3)
 
-    # Aggiungi la deviazione standard nel titolo
-    plt.title(f'Istogramma dei Residui\nDeviazione Standard: {sigma_standard:.4f}')
+    # Add the standard deviation to the title
+    plt.title(f'Histogram of Residuals\nStandard Deviation: {sigma_standard:.4f}')
 
-    plt.xlabel('Residui [m]')
-    plt.ylabel('Frequenza')
+    plt.xlabel('Residuals [m]')
+    plt.ylabel('Frequency')
     plt.legend()
     plt.grid(True)
     plt.show()
 
-def remove_outlier(x,y):
-    # Converti le serie Pandas in array NumPy
+def remove_outlier(x, y):
+    """
+    Remove outliers from x and y based on the interquartile range.
+
+    Parameters:
+    x (pd.Series or list): Input data for x.
+    y (pd.Series or list): Input data for y.
+
+    Returns:
+    tuple: Filtered x and y without outliers.
+    """
+    # Convert Pandas series to NumPy arrays
     x = np.array(x)
     y = np.array(y)
 
-    # Calcola il primo e il terzo quartile di x e y
-    Q1_x, Q3_x = np.percentile(x, [10 ,90])
+    # Calculate the first and third quartiles for x and y
+    Q1_x, Q3_x = np.percentile(x, [10, 90])
     Q1_y, Q3_y = np.percentile(y, [10, 90])
 
-    # Calcola l'interquartile range di x e y
+    # Calculate the interquartile range for x and y
     IQR_x = Q3_x - Q1_x
     IQR_y = Q3_y - Q1_y
 
-    # Definisci il range per considerare un valore outlier
+    # Define the range to consider a value an outlier
     range_outlier = 1.5
 
-    # Trova gli outlier in x
+    # Identify outliers in x
     outlier_x = (x < Q1_x - range_outlier * IQR_x) | (x > Q3_x + range_outlier * IQR_x)
 
-    # Trova gli outlier in y
+    # Identify outliers in y
     outlier_y = (y < Q1_y - range_outlier * IQR_y) | (y > Q3_y + range_outlier * IQR_y)
 
-    # Unisci gli outlier trovati sia in x che in y
+    # Combine outliers found in both x and y
     outlier = outlier_x | outlier_y
 
-    # Rimuovi gli outlier da x e y
+    # Remove outliers from x and y
     x_filtrato = x[~outlier]
     y_filtrato = y[~outlier]
 
-    # Stampa il numero di outlier rimossi
+    # Print the number of outliers removed
     numero_outlier_rimossi = np.sum(outlier)
-    print(f"Hai rimosso {numero_outlier_rimossi} outlier.")
-    return x_filtrato , y_filtrato
-
-
-
-
+    print(f"Removed {numero_outlier_rimossi} outliers.")
+    return x_filtrato, y_filtrato
 
 def save_to_file_OF_results(filename, constant, constant_uncert, velocity):
+    """
+    Save optical flow results to a file.
+
+    Parameters:
+    filename (str): The name of the file to save the results.
+    constant (float): The constant value to save.
+    constant_uncert (float): The uncertainty of the constant value.
+    velocity (float): The velocity value to save.
+    """
     with open(filename, 'a') as file:
         file.write(f"{constant},{constant_uncert},{velocity}\n")
-
-# Funzione per fare regressione lineare con incertezza
 def weighted_linregress_with_error_on_y(x, y, y_err):
-    # Pesi basati sull'errore sull'asse y
+    """
+    Perform weighted linear regression taking into account the uncertainty in y.
+
+    Parameters:
+    x (np.array): Independent variable data.
+    y (np.array): Dependent variable data.
+    y_err (np.array): Uncertainty in y.
+
+    Returns:
+    tuple: Slope, intercept, and R^2 of the regression line.
+    """
+    # Weights based on the uncertainty in y
     w = 1 / y_err
 
-    # Calcola la media pesata dei valori
+    # Calculate the weighted means of x and y
     x_mean = np.average(x, weights=w)
     y_mean = np.average(y, weights=w)
 
-    # Calcola le covarianze pesate
+    # Calculate the weighted covariances
     cov_xy = np.sum(w * (x - x_mean) * (y - y_mean))
     cov_xx = np.sum(w * (x - x_mean) ** 2)
 
-    # Calcola il coefficiente di regressione pesato e l'intercetta
+    # Calculate the weighted regression coefficient and intercept
     slope = cov_xy / cov_xx
     intercept = y_mean - slope * x_mean
 
-    # Calcola l'R^2 considerando solo l'errore sulle y
+    # Calculate R^2 considering only the uncertainty in y
     residui = y - (slope * x + intercept)
     somma_quadri_residui = np.sum(w * residui ** 2)
     totale = np.sum(w * (y - y_mean) ** 2)
@@ -1300,77 +1299,91 @@ def weighted_linregress_with_error_on_y(x, y, y_err):
 
     return slope, intercept, r_squared
 
-
 def smart_cutter_df(df, threshold):
+    """
+    Split a DataFrame into sub-DataFrames based on a threshold for frame discontinuities.
+
+    Parameters:
+    df (pd.DataFrame): Input DataFrame containing frame data.
+    threshold (int): Threshold for identifying frame discontinuities.
+
+    Returns:
+    list: List of sub-DataFrames.
+    """
     start_idx = 0
     sub_dataframes = []
     for i in range(1, len(df)):
         if df['n_frame'].iloc[i] - df['n_frame'].iloc[i - 1] > threshold:
-            # Se c'è una discontinuità
+            # If there is a discontinuity
             sub_dataframes.append(df.iloc[start_idx:i])
             start_idx = i
     sub_dataframes.append(df.iloc[start_idx:])
     return sub_dataframes
 
 def delete_static_data_manually(df, marker_riferimento, confidence_delation):
-    # Calcola il valore massimo e minimo della posizione x del marker di riferimento
+    """
+    Manually delete static data based on the reference marker position and confidence deletion factor.
+
+    Parameters:
+    df (pd.DataFrame): Input DataFrame containing marker data.
+    marker_riferimento (str): Reference marker column name.
+    confidence_delation (float): Confidence deletion factor for determining thresholds.
+
+    Returns:
+    pd.DataFrame: Filtered DataFrame with static data removed.
+    """
+    # Calculate the minimum and maximum values of the reference marker position
     x_min = df[marker_riferimento].min()
     x_max = df[marker_riferimento].max()
 
-    # Calcola il range del valore di x tenendo conto della confidence delation
+    # Calculate the range of x values considering the confidence deletion factor
     x_range = x_max - x_min
     x_range *= (1 - confidence_delation)
 
-    # Calcola i valori soglia
+    # Calculate the threshold values
     x_threshold_min = x_min + confidence_delation * x_range
     x_threshold_max = x_max - confidence_delation * x_range
 
-    # Filtra le righe che non soddisfano i criteri di soglia
+    # Filter rows that do not meet the threshold criteria
     df_filtered = df[(df[marker_riferimento] >= x_threshold_min) & (df[marker_riferimento] <= x_threshold_max)]
 
     return df_filtered
 
-
 def imaga_analizer_raw():
-    # Directory di partenza
+    """
+    Analyze raw image data from MP4 files, extract marker positions, and save the results to a CSV file.
+    """
+    # Starting directory
     start_directory = os.getcwd()
 
-    # Directory di acquisizione raw
+    # Raw acquisition directory
     acquisition_raw_directory = os.path.join(start_directory, 'aquisition_raw')
 
-    # Itera su tutti i file MP4 nella directory di acquisizione raw e nelle sue sottodirectory
+    # Iterate over all MP4 files in the raw acquisition directory and its subdirectories
     for mp4_file in iter_mp4_files(acquisition_raw_directory):
-        print("File MP4 trovato:", mp4_file)
-
+        print("MP4 file found:", mp4_file)
 
         cap = cv2.VideoCapture(mp4_file)
-        # Fai qualcosa con il file MP4, ad esempio leggilo o elaboralo
-
-
 
         PROC = 1
-        # Ottieni il numero totale di frame nel video
+        # Get the total number of frames in the video
         total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
 
-        # Inizializza il contatore dei frame processati
+        # Initialize the processed frame counter
         processed_frames = 0
-
-
 
         n_frames = 0
 
         if PROC:
-            # Elimina il file se già esiste
+            # Delete the file if it already exists
 
             header = ['timestamp', '7_z', '7_vx', '8_z', '8_vx', '9_z', '9_vx', '10_z', '10_vx', '11_z', '11_vx']
             df = pd.DataFrame(columns=header)
 
-
         while cap.isOpened():
-            n_frames = n_frames+1
+            n_frames += 1
             row_data = {'n_frame': n_frames}
 
-            #print("_")
             ret, frame = cap.read()
             timestamp = cap.get(cv2.CAP_PROP_POS_MSEC)
             row_data = {'timestamp': timestamp}
@@ -1379,70 +1392,48 @@ def imaga_analizer_raw():
 
             processed_frames += 1
 
-            # Stampa l'avanzamento ad intervalli regolari
-            if processed_frames % 100 == 0:  # Stampare ogni 100 frame
-                print(f"Frame processati: {processed_frames}/{total_frames}")
-
+            # Print progress at regular intervals
+            if processed_frames % 100 == 0:  # Print every 100 frames
+                print(f"Processed frames: {processed_frames}/{total_frames}")
 
             if PROC:
-                # Calcola l'altezza dell'immagine
+                # Calculate the height of the image
                 height = frame.shape[0]
 
-                # Calcola la nuova altezza dopo il ritaglio
-                new_height = int(height * 0.3)  # Rimuovi un terzo dell'altezza
+                # Calculate the new height after cropping
+                new_height = int(height * 0.3)  # Remove one third of the height
 
-                # Esegui il ritaglio dell'immagine
+                # Crop the image
                 frame = frame[new_height:, :]
 
-
-
-
-            # Trova i marker ArUco nel frame
+            # Find ArUco markers in the frame
             gray_image = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-            # Esempio di regolazione del contrasto e della luminosità
-            alpha = 2  # Fattore di contrasto
-            beta = 5  # Fattore di luminosità
+            # Example of contrast and brightness adjustment
+            alpha = 2  # Contrast factor
+            beta = 5  # Brightness factor
             gray_image = cv2.convertScaleAbs(gray_image, alpha=alpha, beta=beta)
 
-
-            # Esempio di rilevamento dei bordi con Canny edge detector
-
             if PROC:
-
-
-
-
                 corners, ids, rejectedImgPoints = cv2.aruco.detectMarkers(gray_image, aruco_dict, parameters=parameters)
 
-
-
-
-
                 if ids is not None:
-                    # Disegna i marker trovati sul framqe
+                    # Draw detected markers on the frame
                     cv2.aruco.drawDetectedMarkers(frame, corners, ids)
 
-                    # Loop attraverso i marker trovati
-                    # Loop attraverso i marker trovati
-                    #print(len(ids))
+                    # Loop through the found markers
                     for i in range(len(ids)):
-                        # Calcola la posizione 3D del marker rispetto alla telecamera
+                        # Calculate the 3D position of the marker relative to the camera
                         rvec, tvec, _ = cv2.aruco.estimatePoseSingleMarkers(corners[i], MARKER_SIZE, mtx, dist)
-                        marker_position = tvec[0][0]  # Posizione 3D del marker
-                        # Salva la posizione del marker
+                        marker_position = tvec[0][0]  # 3D position of the marker
                         x, y, z = marker_position[0], marker_position[1], marker_position[2]
 
-                        # Estrai l'ID de10l marker
+                        # Extract the marker ID
                         marker_id = ids[i][0]
-                        #print("mkr:ID", marker_id)
 
-                        # if marker_id == 1:
-                        #     print("x,y: ",x,y)
-
-                        # Calcola le coordinate x dei corner del marker
+                        # Calculate the x-coordinates of the marker corners
                         x_coords = corners[i][0][:, 0]
 
-                        # Calcola la coordinata x approssimativa del centro del marker
+                        # Calculate the approximate x-coordinate of the marker center
                         center_x = np.mean(x_coords)
                         z_key = f'{marker_id}_z'
                         vx_key = f'{marker_id}_vx'
@@ -1450,221 +1441,129 @@ def imaga_analizer_raw():
                         row_data[z_key] = z
                         row_data[vx_key] = center_x
 
-
-
-
-
-
-
-            # #cv2.imshow("gray",resize_image(gray_image,50))
-            # cv2.imshow("hhh", resize_image(gray_image, 50))
-
             if cv2.waitKey(1) & 0xFF == ord('q'):
                 break
 
             if PROC:
                 df = pd.concat([df, pd.DataFrame([row_data])], ignore_index=True)
 
-        # Rilascia le risorse
-        # Salva il dataframe su un file Excel
+        # Release resources and save the DataFrame to a CSV file
         if PROC:
-            # Salva il DataFrame in un file CSV
-            # Ottieni la directory corrente
+            # Save the DataFrame to a CSV file
             current_directory = os.getcwd()
 
-            # Conta quanti file CSV iniziano con "raw_re_output" nella directory corrente
+            # Count how many CSV files start with "raw_re_output" in the current directory
             count = sum(
                 1 for file in os.listdir(current_directory) if file.startswith("raw_re_output") and file.endswith(".csv"))
-            df.to_csv('raw_re_output_'+str(count+1)+'.csv', index=False)
+            df.to_csv('raw_re_output_' + str(count + 1) + '.csv', index=False)
 
         cap.release()
         cv2.destroyAllWindows()
 
-###
 def plotter_raw(df):
-    # Ciclo attraverso i marker da 1 a 5
+    """
+    Plot the raw coordinates of markers from the DataFrame.
+
+    Parameters:
+    df (pd.DataFrame): DataFrame containing the marker coordinates.
+
+    Returns:
+    None: Displays scatter plots of the marker coordinates.
+    """
+    # Iterate through marker IDs from 1 to 5
     for marker_inr in marker_ids:
         print("marker:", marker_inr)
-        # Seleziona solo le righe con valori non nulli per il marker corrente
+        # Select rows with non-null values for the current marker
         marker_data = df[df[f'x_ip_{marker_inr}'].notnull() & df[f'z_3D_{marker_inr}'].notnull()]
 
-        # Plot delle coordinate x e z del marker corrente come scatter plot
-        plt.scatter(marker_data['n_frame'], marker_data[f'x_ip_{marker_inr}']/2000, label=f'X Coordinate Marker {marker_inr}', color='blue')
+        # Plot the x and z coordinates of the current marker as scatter plots
+        plt.scatter(marker_data['n_frame'], marker_data[f'x_ip_{marker_inr}'] / 2000, label=f'X Coordinate Marker {marker_inr}', color='blue')
         plt.scatter(marker_data['n_frame'], marker_data[f'z_3D_{marker_inr}'], label=f'Z Coordinate Marker {marker_inr}', color='red')
         plt.scatter(marker_data['n_frame'], marker_data[f'x_3D_{marker_inr}'], label=f'X_3D Coordinate Marker {marker_inr}', color='green')
 
-        # Aggiungi etichette e legenda al grafico corrente
-        plt.xlabel('Numero Frame')
-        plt.ylabel('Coordinate')
-        plt.title(f'Coordinate X, X_3D e Z del Marker {marker_inr}')
+        # Add labels and legend to the current plot
+        plt.xlabel('Frame Number')
+        plt.ylabel('Coordinates')
+        plt.title(f'X, X_3D and Z Coordinates of Marker {marker_inr}')
         plt.legend()
 
-        # Mostra il grafico corrente
+        # Show the current plot
         plt.show()
 
 
 def save_results_to_excel(results, output_excel):
-    # Leggi il file Excel esistente, se presente
+    """
+    Save results to an Excel file.
+
+    Parameters:
+    results (list of dict): List of dictionaries containing the results.
+    output_excel (str): Path to the output Excel file.
+
+    Returns:
+    None: Saves the results to the specified Excel file.
+    """
+    # Read the existing Excel file if it exists
     if os.path.exists(output_excel):
         df = pd.read_excel(output_excel)
     else:
-        df = pd.DataFrame()  # Crea un nuovo DataFrame se il file Excel non esiste
+        df = pd.DataFrame()  # Create a new DataFrame if the Excel file does not exist
 
-    # Itera sui risultati e aggiungi ogni elemento del dizionario come riga nel DataFrame
+    # Iterate over the results and add each dictionary item as a row in the DataFrame
     for result in results:
         dict_to_add = {}
-        # Estrai il valore per ogni colonna dal dizionario e aggiungi come riga al DataFrame
+        # Extract the value for each column from the dictionary and add it as a row to the DataFrame
         for key, value_list in result.items():
-            # Verifica se la chiave (header) esiste già nel DataFrame
+            # Check if the key (header) already exists in the DataFrame
             if key in df.columns:
-                # Se la colonna esiste già, estendi la Serie esistente con i nuovi valori
-
+                # If the column already exists, extend the existing Series with the new values
                 dict_to_add[key] = value_list
         df = df.append(pd.DataFrame(dict_to_add))
 
-
-
-    # Salva il DataFrame aggiornato nel file Excel
+    # Save the updated DataFrame to the Excel file
     df.to_excel(output_excel, index=False)
-def plotter_raw_analys(df,v_rob):
-    results = []  # Lista per memorizzare i risultati
 
-    # Ciclo attraverso i marker da 1 a 5
-    for marker_inr in marker_ids:
-        #print("marker:", marker_inr)
-        # Seleziona solo le righe con valori non nulli per il marker corrente
-        marker_data = df[df[f'x_ip_{marker_inr}'].notnull() & df[f'z_3D_{marker_inr}'].notnull()]
-
-
-
-        all_z_depth = marker_data[f'z_3D_{marker_inr}'].tolist()
-
-        posizione = marker_data[f'x_ip_{marker_inr}'].tolist()
-
-
-        # Calcola i delta tra i valori di posizione successivi
-        opt_flow = [posizione[i + 1] - posizione[i] for i in range(len(posizione) - 1)]
-
-
-        # Estendi la lista dei delta in modo che abbia la stessa dimensione della lista di input di posizione
-        opt_flow.append(opt_flow[-1])  # estendi con l'ultimo valore
-
-
-        marker_list = [int(marker_inr)] * len(all_z_depth)
-        speed_rob_list = [v_rob] * len(all_z_depth)
-        # Aggiungi i risultati alla lista
-        results.append({'marker': marker_list, 'z_mean': all_z_depth,'vx': opt_flow, 'vx_3D': speed_rob_list})
-
-
-
-
-    return results
-#
 # #
+# Main script for calling key functions in the problem
 
-#imaga_analizer_raw()
+# Flag for processing raw video to extract information
+RAW_VIDEO_PROCESSING = 0
 
-#convert_position_to_speed()
+if RAW_VIDEO_PROCESSING:
+    # Function to analyze raw video and extract necessary data
+    imaga_analizer_raw()
 
+    # Function to convert positional data from the video into optical flow data
+    convert_position_to_speed()
 
-# df = pd.read_excel(output_excel)
-# marker_rif_delation = 9
-# df_filtered = delete_static_data_manually(df, f'x_ip_{marker_rif_delation}', 0.04)
-# #plotter_raw(df_filtered)
-# win = 20
-# multi_df = smart_cutter_df(df_filtered, win)
-#
-# acc_filter_final = 0.08
-#
-#
-#
-#
-# if len(multi_df) == 10:
-#     ALL_R_2 = []
-#     for i in range(len(multi_df)):
-#         v_i = i // 2
-#         speed_rob = v_all[v_i]
-#         print(f"dts = {i}, vct = {speed_rob}")
-#
-#         df_filtered = delete_static_data_manually(multi_df[i], f'x_ip_{marker_rif_delation}', acc_filter_final)
-#         res = plotter_raw_analys(df_filtered,speed_rob)
-#         #print(res)
-#         save_results_to_excel(res, output_excel_res)
-#
-#     #
-#
-# else:
-#     print("ERROR CUTTINGGG")
+# Uncomment the following line if intermediate conversion is needed independently
+# convert_position_to_speed()
 
-# file_path = 'dati_of/stich_grande.xlsx'
-# show_result_ex_file(file_path)
+# Flag for performing experimental model fitting and graph generation
+EXPERIMENTAL_MODEL_FITTING = 0
 
-#
-x_s, vy_s  =synchro_data_v_v_e_z("results_raw.xlsx")
-merge_dataset_extr_int(x_s, vy_s)
+if EXPERIMENTAL_MODEL_FITTING:
+    # Path to the data file for experimental model fitting
+    file_path_1 = 'dati_of/all_points_big_fix_speed.xlsx'
 
-#sys.exit()
+    # Function to show results from the experimental file
+    show_result_ex_file(file_path_1)
 
+    # Function to perform windowing analysis and calculate uncertainties
+    windowing_vs_uncertanty(file_path_1)
 
-# file_path_1 = 'dati_of/all_points_big_fix_speed.xlsx'
-# show_result_ex_file(file_path_1)
-# windowing_vs_uncertanty(file_path_1)
-#
-#
-# constant_analisis()
-#
+# Flag for evaluating experimental K constants from the model at different reference speeds
+EXP_Ks_RESULTS_EVALUATION = 0
 
+if EXP_Ks_RESULTS_EVALUATION:
+    # Function to analyze the constant K extracted from the model evaluation at different speeds
+    constant_analisis()
 
+# Flag for synchronizing robot velocities and validating raw optical flow data
+RAW_ROBOT_AND_RAW_OPTICAL_FLOW_VALIDATION = 1
 
-#
-#
-#
-#
-#
-# rrr = []
-# coeff = []
-#
-# # Calcola il passo tenendo conto della precisione
-# passo = 0.002
-#
-# #Precisione desiderata (numero di cifre decimali significative)
-# precisione = 3
-# valori = np.arange(0.01, 0.16, passo)
-# valori_arrotondati = np.around(valori, decimals=precisione)
-# acc_filter_final = 0.075
-# for acc_filter in valori_arrotondati:
-#
-#     coeff.append(acc_filter)
-#
-#     ALL_R_2 = []
-#
-#     if len(multi_df) == 10:
-#         for i in range(len(multi_df)):
-#             print("dataset ",i)
-#             df_filtered = delete_static_data_manually(multi_df[i], f'x_ip_{marker_rif_delation}', acc_filter)
-#             res = plotter_raw_analys(df_filtered)
-#             #print(res)
-#             #save_results_to_excel(res, output_excel_res)
-#         #
-#
-#     else:
-#         print("ERROR CUTTINGGG")
-#
-#
-#     rrr.append(np.mean(ALL_R_2))
-#
-#
-# # Crea il grafico
-# plt.plot(coeff, rrr)
-#
-# # Aggiungi etichette agli assi
-# plt.xlabel('Valori di x')
-# plt.ylabel('Valori di y')
-#
-# # Aggiungi titolo al grafico
-# plt.title('Grafico di x vs y')
-# # Adatta l'asse y ai dati
-# plt.gca().autoscale(axis='y')
-#
-# # Mostra il grafico
-# plt.show()
+if RAW_ROBOT_AND_RAW_OPTICAL_FLOW_VALIDATION:
+    # Function to synchronize external velocities of the robot to ensure a reliable path
+    x_s, vy_s = synchro_data_v_v_e_z("results_raw.xlsx")
+
+    # Function to merge robot raw data with optical flow and depth information, synchronizing and validating the dataset
+    merge_dataset_extr_int(x_s, vy_s)

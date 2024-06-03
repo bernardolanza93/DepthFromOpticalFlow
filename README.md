@@ -61,7 +61,7 @@ The project employs non-linear least squares methods to fit the depth estimation
 
 2. Run the depth estimation process:
     ```sh
-    python depth_estimation.py
+    python depth_multi_marker_optical_flow.py
     ```
 
 ## Contributing
