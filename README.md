@@ -63,6 +63,107 @@ The project employs non-linear least squares methods to fit the depth estimation
     ```sh
     python depth_multi_marker_optical_flow.py
     ```
+   
+
+
+# Image Analyzer Project
+
+## Function Descriptions
+
+### `imaga_analizer_raw`
+This function processes raw video files, detecting and analyzing Aruco markers to extract their positional data. The results are saved for subsequent processing.
+
+### `convert_position_to_speed`
+This function converts the positional data obtained from the raw videos into speed data (optical flow).
+
+## Experimental Model Fitting
+
+This section fits the experimental model to the data and generates graphs to visualize the results.
+
+
+```
+EXPERIMENTAL_MODEL_FITTING = 0
+if EXPERIMENTAL_MODEL_FITTING:
+file_path_1 = 'dati_of/all_points_big_fix_speed.xlsx'
+show_result_ex_file(file_path_1)
+windowing_vs_uncertanty(file_path_1)
+```
+
+
+### `show_result_ex_file`
+This function fits the experimental model to the data in the provided Excel file and generates graphs based on the reference external velocities.
+
+### `windowing_vs_uncertanty`
+This function analyzes the impact of different window sizes on the uncertainty of the model.
+
+## Experimental K's Results Evaluation
+
+This section analyzes the experimental constant values obtained from the model fitting at different reference speeds.
+
+
+EXP_Ks_RESULTS_EVALUATION = 0
+if EXP_Ks_RESULTS_EVALUATION:
+constant_analisis()
+
+
+### `constant_analisis`
+This function performs a detailed analysis of the experimental constant values derived from the model evaluation at various reference speeds.
+
+## Raw Robot and Optical Flow Data Validation
+
+This section involves the synchronization and validation of raw robot data with optical flow and depth information.
+
+RAW_ROBOT_AND_RAW_OPTICAL_FLOW_VALIDATION = 1
+if RAW_ROBOT_AND_RAW_OPTICAL_FLOW_VALIDATION:
+x_s, vy_s = synchro_data_v_v_e_z("results_raw.xlsx")
+merge_dataset_extr_int(x_s, vy_s)
+
+
+### `synchro_data_v_v_e_z`
+This function synchronizes the external velocities of the robot to ensure a reliable robot path.
+
+### `merge_dataset_extr_int`
+This function merges the robot's raw data with optical flow and depth information based on timestamps, ensuring synchronized validation.
+
+
+# Additional Functions
+
+### `find_signal_boundaries`
+Identifies significant changes in a signal based on a threshold.
+
+### `calculate_theo_model_and_analyze`
+Fits a theoretical model to the data and calculates various metrics to evaluate the model's performance.
+
+## Function Descriptions
+
+### `imaga_analizer_raw()`
+Processes raw video files, detecting and analyzing Aruco markers to extract their positional data. The results are saved for subsequent processing.
+
+### `convert_position_to_speed()`
+Converts the positional data obtained from the raw videos into speed data (optical flow).
+
+### `show_result_ex_file(file_path)`
+Fits the experimental model to the data in the provided Excel file and generates graphs based on the reference external velocities.
+
+### `windowing_vs_uncertanty(file_path)`
+Analyzes the impact of different window sizes on the uncertainty of the model.
+
+### `constant_analisis()`
+Performs a detailed analysis of the experimental constant values derived from the model evaluation at various reference speeds.
+
+### `synchro_data_v_v_e_z(file_raw_optics)`
+Synchronizes the external velocities of the robot to ensure a reliable robot path.
+
+### `merge_dataset_extr_int(x, y)`
+Merges the robot's raw data with optical flow and depth information based on timestamps, ensuring synchronized validation.
+
+### `find_signal_boundaries(signal, threshold)`
+Identifies significant changes in a signal based on a threshold.
+
+### `calculate_theo_model_and_analyze(n_df, n_vy, win, vlim)`
+Fits a theoretical model to the data and calculates various metrics to evaluate the model's performance.
+
+
 
 ## Contributing
 
