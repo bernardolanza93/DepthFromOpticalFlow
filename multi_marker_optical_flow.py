@@ -1,9 +1,156 @@
+import sys
+import glob
+import matplotlib.pyplot as plt
+
 from multi_marker_source_function import *
+from sklearn.linear_model import LinearRegression
+import scipy.signal as signal
+from sklearn.cluster import KMeans
+
+
+def convert_robot_in_staircase_signal(noisy_signal):
+
+
+    # Applica un filtro passa basso per ridurre il rumore
+    b, a = signal.butter(3, 0.05)
+    filtered_signal = signal.filtfilt(b, a, noisy_signal)
+
+    # Usa K-means per trovare i livelli dei gradini
+    n_clusters = 5  # Numero di gradini attesi
+    kmeans = KMeans(n_clusters=n_clusters)
+    filtered_signal_reshaped = filtered_signal.reshape(-1, 1)
+    kmeans.fit(filtered_signal_reshaped)
+    cluster_centers = kmeans.cluster_centers_.flatten()
+    labels = kmeans.labels_
+
+    # Crea il segnale quantizzato basato sui cluster
+    quantized_signal = np.zeros_like(filtered_signal)
+    for i in range(n_clusters):
+        quantized_signal[labels == i] = cluster_centers[i]
+
+    # Imposta a zero le parti che non corrispondono ai livelli quantizzati
+    differences = np.abs(np.diff(quantized_signal))
+    change_points = np.where(differences > np.mean(differences) * 0.5)[0] + 1  # 0.5 può essere aggiustato
+    clean_signal = np.copy(quantized_signal)
+    for start, end in zip(change_points[:-1], change_points[1:]):
+        if end - start < 10:  # Ignora cambiamenti troppo piccoli, 10 può essere aggiustato
+            clean_signal[start:end] = 0
+
+#    Visualizza il risultato
+#     plt.figure(figsize=(15, 6))
+#     plt.plot(noisy_signal, label='Noisy Signal', linestyle='--', alpha=0.5)
+#     plt.plot(filtered_signal, label='Filtered Signal', alpha=0.75)
+#     plt.plot(clean_signal, label='Quantized Signal', linewidth=2)
+#     #plt.plot(clean_signal, label='Clean Signal', linewidth=2, color='green')
+#     plt.xlabel('Sample')
+#     plt.ylabel('Amplitude')
+#     plt.title('Step Signal with Noise Filtering and Quantization')
+#     plt.legend()
+#     plt.grid(True)
+#     plt.show()
+    return clean_signal
+
+
+def filter_steady_state_speed(data_frame, vel_robot, window_size=13, slope_threshold=0.001, percentile_threshold=35, min_continuous_length=None):
+
+
+    # Separate columns based on suffix '_vx' and '_z'
+    velocity_columns = [col for col in data_frame.columns if '_vx' in col]
+    depth_columns = [col for col in data_frame.columns if '_z' in col]
+    original_vel_robot = vel_robot.copy()
+    print("robot", len(vel_robot))
+    print("dist", len(depth_columns))
+    print("of", len(velocity_columns))
+
+
+    # plt.figure(figsize=(15, 6))
+    # plt.plot(vel_robot, linestyle='--')
+    # plt.grid(True)
+    # plt.show()
+
+    # Flag condition: filter out short segments with constant values
+    if min_continuous_length is not None:
+        constant_segments = []
+        current_segment = []
+
+        for i in range(1, len(vel_robot)):
+            if vel_robot[i] == vel_robot[i - 1]:
+                current_segment.append(i)
+            else:
+                if len(current_segment) >= min_continuous_length:
+                    # Remove the 5th and 95th percentiles
+                    segment_length = len(current_segment)
+                    lower_bound = int(np.percentile(range(segment_length), 5))
+                    upper_bound = int(np.percentile(range(segment_length), 95))
+
+                    for j in range(segment_length):
+                        if j < lower_bound or j > upper_bound:
+                            vel_robot[current_segment[j]] = 0
+                        else:
+                            constant_segments.append(current_segment[j])
+
+                current_segment = [i]
+
+        if len(current_segment) >= min_continuous_length:
+            constant_segments.extend(current_segment)
+
+        # Set short segments to zero
+        for i in range(len(vel_robot)):
+            if i not in constant_segments:
+                vel_robot[i] = 0
 
 
 
 
-@log_function_call
+
+    # Identify constant speed segments based on linear regression
+    constant_speed_indices = []
+    for i in range(len(vel_robot) - window_size + 1):
+        x = np.arange(window_size).reshape(-1, 1)
+        y = vel_robot[i:i + window_size]
+        model = LinearRegression().fit(x, y)
+        slope = model.coef_[0]
+
+        if abs(slope) < slope_threshold:
+            constant_speed_indices.extend(range(i, i + window_size))
+
+
+
+    # Remove duplicates and sort indices
+    constant_speed_indices = sorted(set(constant_speed_indices))
+
+    # Filter out zero values and the lowest percentiles
+    non_zero_indices = [i for i in constant_speed_indices if vel_robot[i] != 0]
+    lower_percentile = np.percentile(vel_robot, percentile_threshold)
+    filtered_indices = [i for i in non_zero_indices if vel_robot[i] > lower_percentile]
+
+    # Filter the DataFrame and vel_robot based on the filtered indices
+    filtered_data_frame = data_frame.loc[filtered_indices].reset_index(drop=True)
+    filtered_vel_robot = [vel_robot[i] for i in filtered_indices]
+
+    # #Plot before and after filtering
+    # plt.figure(figsize=(12, 6))
+    #
+    # plt.subplot(2, 1, 1)
+    # plt.plot(original_vel_robot, label='Original Velocity')
+    # plt.xlabel('Index')
+    # plt.ylabel('Velocity')
+    # plt.title('Robot Velocity - Original')
+    # plt.legend()
+    #
+    # plt.subplot(2, 1, 2)
+    # plt.scatter(range(len(filtered_vel_robot)), [elemento * 30 for elemento in filtered_vel_robot], label='Filtered Velocity', color='orange', s=10)
+    # plt.scatter(range(len(filtered_data_frame["9_vx"])), filtered_data_frame["9_vx"], label='of', color='black', s=10)
+    #
+    # plt.xlabel('Index')
+    # plt.ylabel('Velocity')
+    # plt.title('Robot Velocity - Filtered')
+    # plt.legend()
+    #
+    # plt.tight_layout()
+    # plt.show()
+
+    return filtered_data_frame, filtered_vel_robot
 def find_signal_boundaries(signal, threshold=0.1):
     """
     Find the start and end times of a signal that undergoes rapid changes.
@@ -22,7 +169,9 @@ def find_signal_boundaries(signal, threshold=0.1):
     significant_changes = np.where(np.abs(derivative) > threshold)[0]
 
     if len(significant_changes) == 0:
+
         return None, None
+
 
     # Get the first and last significant change
     start_idx = significant_changes[0]
@@ -44,6 +193,10 @@ def find_signal_boundaries(signal, threshold=0.1):
 
 @log_function_call
 def calculate_theo_model_and_analyze(n_df, n_vy, win, vlim):
+    print("___________________________")
+    if win > 1:
+        print("window_",win)
+
     """
     Calculate the theoretical model and analyze the data.
 
@@ -66,6 +219,9 @@ def calculate_theo_model_and_analyze(n_df, n_vy, win, vlim):
     all_distance = []
     all_vy_robot = []
 
+
+
+
     for vx_col, z_col in zip(vx_columns, z_columns):
         # Smooth the data
         smoothed_vx = n_df[vx_col].rolling(window=win).mean()
@@ -73,17 +229,26 @@ def calculate_theo_model_and_analyze(n_df, n_vy, win, vlim):
 
         dist = []
         for i in range(len(n_df)):
+
             if n_vy[i] > vlim:
-                if n_df[vx_col].iloc[i] != 0:
-                    dist.append(n_vy[i] * fx / (n_df[vx_col].iloc[i] * 60))
+                #if n_df[vx_col].iloc[i] != 0:
+                if 1:
+                    if n_df[vx_col].iloc[i] == 0:
+                        print("ZERO OF", vx_col)
+                        plt.figure(figsize=(10, 5))
+                        plt.plot(n_df[vx_col])
+                        plt.grid(True)
+                        plt.show()
+
+
+                    all_z.append(n_df[z_col].iloc[i])
+                    all_distance.append(n_vy[i] * fx / (n_df[vx_col].iloc[i] * 60))
                 else:
-                    dist.append(np.nan)  # Handle division by zero
+                    all_z.append(np.nan)
+                    all_distance.append(np.nan)
 
                 # Append values to overall vectors
-                all_z.append(n_df[z_col].iloc[i])
-                all_vx.append(n_df[vx_col].iloc[i] * 60)
-                all_distance.append(n_vy[i] * fx / (n_df[vx_col].iloc[i] * 60))
-                all_vy_robot.append(n_vy[i])
+
 
     # Convert lists to numpy arrays
     all_z = np.array(all_z)
@@ -94,27 +259,27 @@ def calculate_theo_model_and_analyze(n_df, n_vy, win, vlim):
     all_z = all_z[mask]
     all_distance = all_distance[mask]
 
-    # Fit the model Y = X
-    y_pred = all_z  # Model Y = X predicts y_pred is equal to x
 
-    # Calculate R^2
-    r2 = r2_score(all_distance, y_pred)
+
+    r2 = r2_score(all_distance, all_z)
 
     # Calculate other goodness-of-fit metrics
-    mse = mean_squared_error(all_distance, y_pred)
-    mae = mean_absolute_error(all_distance, y_pred)
+    mse = mean_squared_error(all_distance, all_z)
+    mae = mean_absolute_error(all_distance, all_z)
     rmse = np.sqrt(mse)
 
     # Calculate mean dispersion
-    mean_dispersion = np.mean(np.abs(all_distance - y_pred))
+    mean_dispersion = np.mean(np.abs(all_distance - all_z))
 
     print("R^2:", r2)
     print("Mean Squared Error (MSE):", mse)
     print("Root Mean Squared Error (RMSE):", rmse)
     print("Mean Absolute Error (MAE):", mae)
-    print("Mean Dispersion:", mean_dispersion)
+    #print("Mean Dispersion:", mean_dispersion)
 
     return all_z, all_distance
+
+
 
 
 @log_function_call
@@ -130,170 +295,369 @@ def merge_dataset_extr_int(x, vy):
     None
     """
     vy = abs(vy)
+    # Directory path
+    directory_path = '/home/mmt-ben/DepthFromOpticalFlow/data_timestaped_raw/'
+
+    # Get all CSV files in the directory
+    file_paths = glob.glob(f"{directory_path}/*.csv")
+    all_4_of_df = []
+    all_4_robot_list = []
+    all_4_robot_quantized = []
+
 
     # Path to the CSV file
-    file_path = '/home/mmt-ben/MAPPER_AGRI_MULTICAM/of_raw_re_output_1.csv'
+    for file_path in file_paths:
+        # Load the CSV file
+        df = pd.read_csv(file_path)
 
-    # Load the CSV file
-    df = pd.read_csv(file_path)
+        # Remove columns that contain "164"
+        df = df.loc[:, ~df.columns.str.contains('164')]
 
-    # Remove columns that contain "164"
-    df = df.loc[:, ~df.columns.str.contains('164')]
+        # Remove columns with zero non-null values
+        df = df.dropna(axis=1, how='all')
 
-    # Remove columns with zero non-null values
-    df = df.dropna(axis=1, how='all')
 
-    # Filter data up to the 3300th record
-    df = df.loc[:3299]
 
-    # Generate a timestamp if the timestamp column has no valid data
-    df['timestamp'] = range(len(df))
-    t = df['timestamp']
 
-    x_vy = x
-    FIND_SHIFTER = 0
 
-    if FIND_SHIFTER:
-        mean_diff_s_robot = []
-        mean_diff_s_cam = []
-        meanss = []
-        for shift_rob in np.arange(0, 0.006, 0.0001):
-            for shift_cam in np.arange(0, 4, 0.1):
-                ini, endi = find_signal_boundaries(df["11_vx"], shift_cam)
-                ini_rob, endi_rob = find_signal_boundaries(vy, shift_rob)
 
-                if ini is not None and endi is not None:
-                    # Trim all signals in the DataFrame using these indices
-                    n_df = df.iloc[ini - 2:endi + 3].reset_index(drop=True)
+        # Filter data up to the 3300th record
+        #df = df.loc[:4099]
 
-                if ini_rob is not None and endi_rob is not None:
-                    n_vy = vy[ini_rob:endi_rob + 1]
-                    n_x_vy = x_vy[ini_rob:endi_rob + 1]
+        # Generate a timestamp if the timestamp column has no valid data
+        df['timestamp'] = range(len(df))
+        t = df['timestamp']
 
-                n_df['timestamp'] = n_df['timestamp'] - n_df['timestamp'].iloc[0]
-                n_x_vy = n_x_vy - n_x_vy[0]
+        # Filter columns to include only those that contain "vx" in the name
+        vx_columns = df.columns[df.columns.str.contains('vx')]
 
-                # Method 1: Using slicing
-                factor = len(n_vy) // len(n_df["11_vx"])
+        # Find the column with the least number of null values among the filtered columns
+        least_nulls_col = str(df[vx_columns].isnull().sum().idxmin())
 
-                # Create a new time axis for the decimated signal
-                x_vy_decimated = np.linspace(n_df["timestamp"].iloc[0], n_df["timestamp"].iloc[-1], len(n_df["11_vx"]))
+        # Select the column with the least null values
+        reference_column = df[least_nulls_col]
 
-                # Interpolate the n_vy signal on the new time axis
-                interpolator = interp1d(np.linspace(0, len(n_vy) - 1, len(n_vy)), n_vy, kind='linear')
-                n_vy_decimated = interpolator(np.linspace(0, len(n_vy) - 1, len(n_df["11_vx"])))
-                n_vy = n_vy_decimated
-                n_x_vy = x_vy_decimated
+        print(f"The column with the least null values that contains 'vx' is: {least_nulls_col}")
 
-                _11_esay = n_df["11_vx"].tolist()
-                massimo_segnale2 = max(_11_esay)
-                max1 = max(n_vy)
-                segnale_normalizzato = n_vy / max1 * massimo_segnale2
 
-                pointwise_difference = [abs(a - b) for a, b in zip(segnale_normalizzato, _11_esay)]
-                data_array = np.array(pointwise_difference)
-                mean_difference = np.nanmean(data_array)
+        threshold_fles = 0.5
 
-                meanss.append(mean_difference)
-                mean_diff_s_robot.append(shift_rob)
-                mean_diff_s_cam.append(shift_cam)
-                print(mean_difference)
+        # Define a threshold for what is considered "close to zero"
 
-        range_list = np.linspace(0, len(meanss) - 1, len(meanss), dtype=int)
 
-        plt.scatter(range_list, meanss)
-        plt.show()
+        # Apply a moving average to smooth the signal
+        window_size = 50  # Adjust the window size as needed
+        smoothed_signal = reference_column.rolling(window=window_size, min_periods=1).mean()
 
-        data_array = np.array(meanss)
-        min_index = np.nanargmin(data_array)
-        thres_robot = mean_diff_s_robot[min_index]
-        thres_cam = mean_diff_s_cam[min_index]
-        print(min_index, thres_robot, thres_cam)
-    else:
-        thres_robot = 0.0035
-        thres_cam = 1.0
+        # Find the index of the last value above the threshold in the smoothed signal
+        last_significant_index = smoothed_signal[smoothed_signal.abs() > threshold_fles].index[-1]
 
-    ini, endi = find_signal_boundaries(df["11_vx"], thres_cam)
-    ini_rob, endi_rob = find_signal_boundaries(vy, thres_robot)
+        # Truncate the signal up to the last significant value
+        truncated_signal = reference_column.loc[:last_significant_index]
+        print("CUT INDEX:",last_significant_index, "/", len(reference_column))
 
-    if ini is not None and endi is not None:
-        # Trim all signals in the DataFrame using these indices
-        n_df = df.iloc[ini - 2:endi + 3].reset_index(drop=True)
 
-    if ini_rob is not None and endi_rob is not None:
-        n_vy = vy[ini_rob:endi_rob + 1]
-        n_x_vy = x_vy[ini_rob:endi_rob + 1]
+        df = df.loc[:last_significant_index]
+        #evita problematiche di inizializzazione
+        df = df.iloc[85:].reset_index(drop=True)
 
-    n_df['timestamp'] = n_df['timestamp'] - n_df['timestamp'].iloc[0]
-    n_x_vy = n_x_vy - n_x_vy[0]
 
-    factor = len(n_vy) // len(n_df["11_vx"])
+        reference_id = df[least_nulls_col].tolist()
 
-    x_vy_decimated = np.linspace(n_df["timestamp"].iloc[0], n_df["timestamp"].iloc[-1], len(n_df["11_vx"]))
-    interpolator = interp1d(np.linspace(0, len(n_vy) - 1, len(n_vy)), n_vy, kind='linear')
-    n_vy_decimated = interpolator(np.linspace(0, len(n_vy) - 1, len(n_df["11_vx"])))
-    n_vy = n_vy_decimated
-    n_x_vy = x_vy_decimated
 
-    _11_esay = n_df["11_vx"].tolist()
-    massimo_segnale2 = max(_11_esay)
-    max1 = max(n_vy)
-    segnale_normalizzato = n_vy / max1 * massimo_segnale2
+        # # Plot the data
+        # plt.plot(reference_id, linewidth=1, color='blue')
+        #
+        # # Add labels and title (optional)
+        # plt.xlabel('Index')
+        # plt.ylabel('Value')
+        # plt.title('Plot of _11_esay')
+        #
+        # # Display the plot
+        # plt.show()
 
-    n_vx_columns = [col for col in n_df.columns if '_vx' in col]
-    n_z_columns = [col for col in n_df.columns if '_z' in col]
 
-    # Create a plot with three subplots
-    fig, axs = plt.subplots(3, 1, figsize=(12, 15))
 
-    # First subplot for vx_columns
-    for col in n_vx_columns:
-        axs[0].plot(n_df['timestamp'], n_df[col], label=col)
-    axs[0].plot(n_df['timestamp'], segnale_normalizzato, label="ROB")
-    axs[0].set_xlabel('Timestamp')
-    axs[0].set_ylabel('VX Values')
-    axs[0].set_title('Original VX Signals')
-    axs[0].legend()
-    axs[0].grid(True)
 
-    # Second subplot for vy
-    axs[1].plot(n_x_vy, n_vy, label='ROBOT', linestyle='--', color='black')
-    axs[1].set_xlabel('Time')
-    axs[1].set_ylabel('Velocity (vy)')
-    axs[1].set_title('Ground Truth (vy)')
-    axs[1].legend()
-    axs[1].grid(True)
 
-    # Third subplot for z_columns
-    for col in n_z_columns:
-        axs[2].plot(n_df['timestamp'], n_df[col], label=col)
-    axs[2].set_xlabel('Timestamp')
-    axs[2].set_ylabel('Z Values')
-    axs[2].set_title('Original Z Signals')
-    axs[2].legend()
-    axs[2].grid(True)
 
-    # Show the plots
-    plt.tight_layout()
-    plt.show()
 
-    all_z, all_distance = calculate_theo_model_and_analyze(n_df, n_vy, 1, 0.2)
-    all_z_3, all_distance_3 = calculate_theo_model_and_analyze(n_df, n_vy, 5, 0.23)
+
+
+
+
+        x_vy = x
+        FIND_SHIFTER = 1
+
+        if FIND_SHIFTER:
+            mean_diff_s_robot = []
+            mean_diff_s_cam = []
+            meanss = []
+            for shift_rob in np.arange(0.002, 0.008, 0.0001):
+                for shift_cam in np.arange(0.5, 1.5, 0.1):
+                    ini, endi = find_signal_boundaries(df[least_nulls_col], shift_cam)
+
+
+                    ini_rob, endi_rob = find_signal_boundaries(vy, shift_rob)
+
+
+
+                    if ini is not None and endi is not None:
+                        # Trim all signals in the DataFrame using these indices
+                        n_df = df.iloc[ini - 2:endi + 3].reset_index(drop=True)
+
+                    if ini_rob is not None and endi_rob is not None:
+                        n_vy = vy[ini_rob:endi_rob + 1]
+                        n_x_vy = x_vy[ini_rob:endi_rob + 1]
+
+                    n_df['timestamp'] = n_df['timestamp'] - n_df['timestamp'].iloc[0]
+
+
+                    # Create a new time axis for the decimated signal
+                    x_vy_decimated = np.linspace(n_df["timestamp"].iloc[0], n_df["timestamp"].iloc[-1], len(n_df[least_nulls_col]))
+
+                    # Interpolate the n_vy signal on the new time axis
+                    interpolator = interp1d(np.linspace(0, len(n_vy) - 1, len(n_vy)), n_vy, kind='linear')
+                    n_vy_decimated = interpolator(np.linspace(0, len(n_vy) - 1, len(n_df[least_nulls_col])))
+
+                    n_vy = n_vy_decimated
+                    n_x_vy = x_vy_decimated
+
+
+                    _11_esay = n_df[least_nulls_col].tolist()
+
+
+
+
+                    massimo_segnale2 = np.nanmax(_11_esay)
+
+                    max1 = max(n_vy)
+
+
+                    segnale_normalizzato = ( n_vy / max1 ) * massimo_segnale2
+
+                    pointwise_difference = [abs(a - b) for a, b in zip(segnale_normalizzato, _11_esay)]
+                    data_array = np.array(pointwise_difference)
+                    mean_difference = np.nanmean(data_array)
+
+                    meanss.append(mean_difference)
+                    mean_diff_s_robot.append(shift_rob)
+                    mean_diff_s_cam.append(shift_cam)
+
+            range_list = np.linspace(0, len(meanss) - 1, len(meanss), dtype=int)
+
+
+
+            data_array = np.array(meanss)
+            min_index = np.nanargmin(data_array)
+            thres_robot = mean_diff_s_robot[min_index]
+            thres_cam = mean_diff_s_cam[min_index]
+            print("choosen cut epoch idex:",min_index, thres_robot, thres_cam)
+        else:
+            thres_robot = 0.0035
+            thres_cam = 1.0
+
+        ini, endi = find_signal_boundaries(df[least_nulls_col], thres_cam)
+        ini_rob, endi_rob = find_signal_boundaries(vy, thres_robot)
+
+        print("cutting robot:",ini_rob, endi_rob, "cutting of:",ini, endi)
+
+        if ini is not None and endi is not None:
+            # Trim all signals in the DataFrame using these indices
+            n_df = df.iloc[ini - 2:endi + 3].reset_index(drop=True)
+
+        if ini_rob is not None and endi_rob is not None:
+            n_vy = vy[ini_rob:endi_rob + 1]
+            n_x_vy = x_vy[ini_rob:endi_rob + 1]
+
+        n_df['timestamp'] = n_df['timestamp'] - n_df['timestamp'].iloc[0]
+        n_x_vy = n_x_vy - n_x_vy[0]
+
+        factor = len(n_vy) // len(n_df[least_nulls_col])
+
+        x_vy_decimated = np.linspace(n_df["timestamp"].iloc[0], n_df["timestamp"].iloc[-1], len(n_df[least_nulls_col]))
+        interpolator = interp1d(np.linspace(0, len(n_vy) - 1, len(n_vy)), n_vy, kind='linear')
+        n_vy_decimated = interpolator(np.linspace(0, len(n_vy) - 1, len(n_df[least_nulls_col])))
+        n_vy = n_vy_decimated
+        n_x_vy = x_vy_decimated
+
+        _11_esay = n_df[least_nulls_col].tolist()
+
+
+        massimo_segnale2 = np.nanmax(_11_esay)
+        max1 = np.nanmax(n_vy)
+        segnale_normalizzato = n_vy / max1 * massimo_segnale2
+
+        n_vx_columns = [col for col in n_df.columns if '_vx' in col]
+        n_z_columns = [col for col in n_df.columns if '_z' in col]
+
+        # # Create a plot with three subplots
+        # fig, axs = plt.subplots(3, 1, figsize=(12, 15))
+        #
+        # # First subplot for vx_columns
+        # for col in n_vx_columns:
+        #     axs[0].plot(n_df['timestamp'], n_df[col], label=col)
+        # axs[0].plot(n_df['timestamp'], segnale_normalizzato, linestyle='--', linewidth=2.5,color='yellow', label="ROB")
+        # axs[0].set_xlabel('Timestamp')
+        # axs[0].set_ylabel('VX Values')
+        # axs[0].set_title('Original VX Signals')
+        # axs[0].legend()
+        # axs[0].grid(True)
+        #
+        # # Second subplot for vy
+        # axs[1].plot(n_x_vy, n_vy, label='ROBOT', linestyle='--', color='black')
+        # axs[1].set_xlabel('Time')
+        # axs[1].set_ylabel('Velocity (vy)')
+        # axs[1].set_title('Ground Truth (vy)')
+        # axs[1].legend()
+        # axs[1].grid(True)
+        #
+        # # Third subplot for z_columns
+        # for col in n_z_columns:
+        #     axs[2].plot(n_df['timestamp'], n_df[col], label=col)
+        # axs[2].set_xlabel('Timestamp')
+        # axs[2].set_ylabel('Z Values')
+        # axs[2].set_title('Original Z Signals')
+        # axs[2].legend()
+        # axs[2].grid(True)
+        #
+        # # Show the plots
+        # plt.tight_layout()
+        # plt.show()
+
+
+        all_4_of_df.append(n_df)
+        all_4_robot_list.append(n_vy)
+        n_vy_quant_i = convert_robot_in_staircase_signal(n_vy)
+        all_4_robot_quantized.append(n_vy_quant_i)
+
+
+    all_dist_4_MRU = []
+    all_z_4_MRU = []
+    all_dist_4_MRU_quant = []
+    all_z_4_MRU_quant = []
+    all_dist_4_MRU_quant_w = []
+    all_z_4_MRU_quant_w = []
+    all_dist_4_MRU_w = []
+    all_z_4_MRU_w = []
+
+
+    for i in range(len(all_4_robot_list)):
+        n_vy = all_4_robot_list[i]
+        n_df = all_4_of_df[i]
+        n_vy_quant = all_4_robot_quantized[i]
+        #ORA QUI DEVO FILTRARE LE VELOCITA E RIMUOVERE LA PARTE DI ACCELERAZIONE :
+        n_df_MRU, n_vy_MRU  = filter_steady_state_speed(n_df, n_vy)
+
+        n_df_MRU_quant, n_vy_MRU_quant = filter_steady_state_speed(n_df, n_vy_quant,10,0.05,35,35)
+        print("filtration:",len(n_vy_MRU)," / ",len(n_vy))
+
+        print("INSTANT")
+        all_z_filtered, all_distance_filtered = calculate_theo_model_and_analyze(n_df_MRU, n_vy_MRU, 1, 0.2)
+        print("INSTANT wind")
+
+        all_z_filtered_w, all_distance_filtered_w = calculate_theo_model_and_analyze(n_df_MRU, n_vy_MRU, 3, 0.2)
+        print("QUANT")
+
+        all_z_filtered_quant, all_distance_filtered_quant = calculate_theo_model_and_analyze(n_df_MRU_quant, n_vy_MRU_quant, 1, 0.2)
+        print("QUANT win")
+        all_z_filtered_quant_w, all_distance_filtered_quant_w = calculate_theo_model_and_analyze(n_df_MRU_quant, n_vy_MRU_quant, 3, 0.2)
+
+        all_dist_4_MRU_quant.extend(all_distance_filtered_quant)
+        all_z_4_MRU_quant.extend(all_z_filtered_quant)
+
+        all_dist_4_MRU.extend(all_distance_filtered)
+        all_z_4_MRU.extend(all_z_filtered)
+
+        all_dist_4_MRU_quant_w.extend(all_distance_filtered_quant_w)
+        all_z_4_MRU_quant_w.extend(all_z_filtered_quant_w)
+
+        all_dist_4_MRU_w.extend(all_distance_filtered_w)
+        all_z_4_MRU_w.extend(all_z_filtered_w)
+
+
+    plt.figure(figsize=(10, 5))
+    lab1 ='instant'
+    lab2 ='instant + windowed'
+    lab3 ='quantized'
+    lab4 ='quantized + windowed'
+
+    plt.scatter(all_z_4_MRU, all_dist_4_MRU, label= lab1, marker="v", alpha=0.3, s=3)
+    plt.scatter(all_z_4_MRU_w, all_dist_4_MRU_w, label= lab2, marker="x", alpha=0.3, s=3)
+    plt.scatter(all_z_4_MRU_quant, all_dist_4_MRU_quant, label= lab3, marker="s", alpha=0.3, s=3)
+    plt.scatter(all_z_4_MRU_quant_w, all_dist_4_MRU_quant_w, label= lab4, marker="o", alpha=0.3, s=3)
 
     # Plot relationships
-    plt.figure(figsize=(10, 5))
-    plt.scatter(all_z, all_distance, label='Distance vs VX', alpha=0.5, s=1)
-    plt.scatter(all_z_3, all_distance_3, label='Distance vs VX mean 3', alpha=0.5, s=1)
-    min_val = min(min(all_z), min(all_distance))
-    max_val = max(max(all_z), max(all_distance))
-    plt.plot([min_val, max_val], [min_val, max_val], 'r--', label='Perfect Prediction (y = x)')
+
+
+
+    min_val = min(min(all_z_filtered), min(all_distance_filtered))
+    max_val = max(max(all_z_filtered), max(all_distance_filtered))
+    plt.plot([0, max_val], [0, max_val], 'r--', label='Perfect Prediction (y = x)')
 
     plt.xlabel('Real')
     plt.ylabel('Predicted')
     plt.title('Relationship between VX, Distance, and Z')
+    plt.xlim(0.2,2.5)
+    plt.ylim(0.2, 2.5)
     plt.legend()
     plt.grid(True)
     plt.show()
+
+    # Convertire le liste in array numpy
+    all_z_4_MRU = np.array(all_z_4_MRU)
+    all_dist_4_MRU = np.array(all_dist_4_MRU)
+
+    all_z_4_MRU_quant = np.array(all_z_4_MRU_quant)
+    all_dist_4_MRU_quant = np.array(all_dist_4_MRU_quant)
+
+    all_z_4_MRU_quant_w = np.array(all_z_4_MRU_quant_w)
+    all_dist_4_MRU_quant_w = np.array(all_dist_4_MRU_quant_w)
+
+    all_z_4_MRU_w = np.array(all_z_4_MRU_w)
+    all_dist_4_MRU_w = np.array(all_dist_4_MRU_w)
+
+
+    #hist
+    # Creazione degli istogrammi
+    # Creazione degli istogrammi con curve normali
+    plt.figure(figsize=(10, 5))
+
+    # Calcolare gli errori e le statistiche
+    errors_MRU = all_dist_4_MRU - all_z_4_MRU
+    errors_MRU_quant = all_dist_4_MRU_quant - all_z_4_MRU_quant
+    errors_MRU_quant_w = all_dist_4_MRU_quant_w - all_z_4_MRU_quant_w
+    errors_MRU_w = all_dist_4_MRU_w - all_z_4_MRU_w
+
+    # Creare gli istogrammi
+    plt.hist(errors_MRU, bins=30, alpha=0.5, label=lab1, density=True)
+    plt.hist(errors_MRU_quant, bins=30, alpha=0.5, label=lab2, density=True)
+    plt.hist(errors_MRU_quant_w, bins=30, alpha=0.5, label=lab3, density=True)
+    plt.hist(errors_MRU_w, bins=30, alpha=0.5, label=lab4, density=True)
+
+    # Calcolare le curve normali
+    mean_MRU, std_MRU = np.mean(errors_MRU), np.std(errors_MRU)
+    mean_MRU_quant, std_MRU_quant = np.mean(errors_MRU_quant), np.std(errors_MRU_quant)
+    mean_MRU_quant_w, std_MRU_quant_w = np.mean(errors_MRU_quant_w), np.std(errors_MRU_quant_w)
+    mean_MRU_w, std_MRU_w = np.mean(errors_MRU_w), np.std(errors_MRU_w)
+
+    x = np.linspace(-1, 1, 100)
+    plt.plot(x, norm.pdf(x, mean_MRU, std_MRU), label=f'{lab1} ($\sigma={std_MRU:.2f}$m)')
+    plt.plot(x, norm.pdf(x, mean_MRU_w, std_MRU_w), label=f'{lab2} ($\sigma={std_MRU_w:.2f}$m)')
+
+    plt.plot(x, norm.pdf(x, mean_MRU_quant, std_MRU_quant), label=f' {lab3} ($\sigma={std_MRU_quant:.2f}$m)')
+    plt.plot(x, norm.pdf(x, mean_MRU_quant_w, std_MRU_quant_w), label=f'{lab4} ($\sigma={std_MRU_quant_w:.2f}$m)')
+
+
+
+    plt.xlabel('Error (Predicted - Real)')
+    plt.ylabel('Frequency')
+    plt.title(f'Error Distribution with Normal Curves and Sigma in Meters')
+    plt.legend()
+    plt.grid(True)
+    plt.show()
+
+
 
 
 def modello(x, costante):
@@ -1095,16 +1459,14 @@ def synchro_data_v_v_e_z(file_raw_optics):
     mean_velocity_smoothed_series = pd.Series(mean_velocity_smoothed)
     mean_velocity_smoothed_interpolated = mean_velocity_smoothed_series.interpolate(method='linear').to_numpy()
 
-    plt.scatter(x_smoothed, mean_velocity_smoothed_interpolated, label='Smoothed Mean Velocity', s=3)
-    # plt.scatter(common_timestamp, mean_position, label='Signal 1', s=1)
-    # plt.scatter(common_timestamp, y2, label='Signal 1', s=1)
-    # plt.scatter(common_timestamp, y3, label='Signal 1', s=1)
-
-    plt.xlabel('Time')
-    plt.ylabel('Signal Value')
-    plt.title('Signals sharing the x-axis')
-    plt.legend()
-    plt.show()
+    # plt.scatter(x_smoothed, mean_velocity_smoothed_interpolated, label='Smoothed Mean Velocity', s=3)
+    #
+    #
+    # plt.xlabel('Time')
+    # plt.ylabel('Signal Value')
+    # plt.title('Signals sharing the x-axis')
+    # plt.legend()
+    # plt.show()
 
     return x_smoothed, mean_velocity_smoothed_interpolated
 

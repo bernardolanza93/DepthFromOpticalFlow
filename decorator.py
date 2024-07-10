@@ -10,7 +10,7 @@ def log_function_call(func):
         print(f"Calling function: {function_name}")
         # Stampa gli argomenti posizionali
         if args:
-            print(f"Positional arguments: {args}")
+            print(f"Positional arguments: {len(args)}")
         # Stampa gli argomenti nominati
         if kwargs:
             print(f"Keyword arguments: {kwargs}")
