@@ -7,6 +7,59 @@ from sklearn.linear_model import LinearRegression
 import scipy.signal as signal
 from sklearn.cluster import KMeans
 
+DISCARD_HIGH_SPEED  = 0
+MAX_SPEED=0.70
+
+
+def bland_altman_plot(x, y, k, save_path, file_name="bland_altman_plot.png"):
+    """
+    Crea e salva un grafico Bland-Altman per valutare il fitting del modello y = k/x.
+
+    Parametri:
+    x (array): Valori osservati della variabile indipendente.
+    y (array): Valori osservati della variabile dipendente.
+    k (float): Parametro del modello y = k/x.
+    save_path (str): Cartella in cui salvare il grafico.
+    file_name (str): Nome del file per il grafico salvato (default: "bland_altman_plot.png").
+    """
+
+    # Calcolo delle previsioni
+    y_pred = k / x
+
+    # Calcolo delle differenze e delle medie
+    diff = y - y_pred
+    mean = (y + y_pred) / 2
+
+    # Calcolo della media e della deviazione standard delle differenze
+    mean_diff = np.mean(diff)
+    std_diff = np.std(diff, ddof=1)
+
+    # Limiti di accordo
+    lower_limit = mean_diff - 1.96 * std_diff
+    upper_limit = mean_diff + 1.96 * std_diff
+
+    # Creazione del grafico Bland-Altman
+    plt.figure(figsize=(10, 5))
+    plt.scatter(mean, diff, color='blue', s=50, label='Differenze')
+    plt.axhline(mean_diff, color='gray', linestyle='--', label='Media delle differenze')
+    plt.axhline(lower_limit, color='red', linestyle='--', label='Limite inferiore (95%)')
+    plt.axhline(upper_limit, color='red', linestyle='--', label='Limite superiore (95%)')
+    plt.xlabel('Media dei valori osservati e previsti')
+    plt.ylabel('Differenza tra valori osservati e previsti')
+    plt.title('Grafico Bland-Altman')
+    plt.legend()
+
+    plt.grid(True)
+    plt.show()
+
+    # Creazione della cartella se non esiste
+    if not os.path.exists(save_path):
+        os.makedirs(save_path)
+
+    # Salvataggio del grafico
+    save_file = os.path.join(save_path, file_name)
+    plt.savefig(save_file)
+    plt.close()
 
 def convert_robot_in_staircase_signal(noisy_signal):
 
@@ -52,8 +105,6 @@ def convert_robot_in_staircase_signal(noisy_signal):
 
 
 def filter_steady_state_speed(data_frame, vel_robot, window_size=13, slope_threshold=0.001, percentile_threshold=35, min_continuous_length=None):
-
-
     # Separate columns based on suffix '_vx' and '_z'
     velocity_columns = [col for col in data_frame.columns if '_vx' in col]
     depth_columns = [col for col in data_frame.columns if '_z' in col]
@@ -61,12 +112,6 @@ def filter_steady_state_speed(data_frame, vel_robot, window_size=13, slope_thres
     print("robot", len(vel_robot))
     print("dist", len(depth_columns))
     print("of", len(velocity_columns))
-
-
-    # plt.figure(figsize=(15, 6))
-    # plt.plot(vel_robot, linestyle='--')
-    # plt.grid(True)
-    # plt.show()
 
     # Flag condition: filter out short segments with constant values
     if min_continuous_length is not None:
@@ -92,16 +137,27 @@ def filter_steady_state_speed(data_frame, vel_robot, window_size=13, slope_thres
                 current_segment = [i]
 
         if len(current_segment) >= min_continuous_length:
-            constant_segments.extend(current_segment)
+            segment_length = len(current_segment)
+            lower_bound = int(np.percentile(range(segment_length), 5))
+            upper_bound = int(np.percentile(range(segment_length), 95))
+
+            for j in range(segment_length):
+                if j < lower_bound or j > upper_bound:
+                    vel_robot[current_segment[j]] = 0
+                else:
+                    constant_segments.append(current_segment[j])
 
         # Set short segments to zero
         for i in range(len(vel_robot)):
             if i not in constant_segments:
                 vel_robot[i] = 0
 
+    # New condition: filter out velocities above max_velocity
 
-
-
+    if DISCARD_HIGH_SPEED:
+        for i in range(len(vel_robot)):
+            if vel_robot[i] > MAX_SPEED:
+                vel_robot[i] = 0
 
     # Identify constant speed segments based on linear regression
     constant_speed_indices = []
@@ -113,8 +169,6 @@ def filter_steady_state_speed(data_frame, vel_robot, window_size=13, slope_thres
 
         if abs(slope) < slope_threshold:
             constant_speed_indices.extend(range(i, i + window_size))
-
-
 
     # Remove duplicates and sort indices
     constant_speed_indices = sorted(set(constant_speed_indices))
@@ -128,7 +182,7 @@ def filter_steady_state_speed(data_frame, vel_robot, window_size=13, slope_thres
     filtered_data_frame = data_frame.loc[filtered_indices].reset_index(drop=True)
     filtered_vel_robot = [vel_robot[i] for i in filtered_indices]
 
-    # #Plot before and after filtering
+    #Plot before and after filtering
     # plt.figure(figsize=(12, 6))
     #
     # plt.subplot(2, 1, 1)
@@ -304,9 +358,24 @@ def merge_dataset_extr_int(x, vy):
     all_4_robot_list = []
     all_4_robot_quantized = []
 
-
+    file = 0
     # Path to the CSV file
     for file_path in file_paths:
+        #2 buono
+        #1 cattivo
+        #3 medio
+        #4 medio buono
+
+        file += 1
+        SELECT_SINGLE_TEST = 1
+
+        #POSSIBILITÀ ANCHE DI IMPLEMENTARE UNA SOGLIA DI VELOCITÀ PER ESCLUDERE PROVE CATTIVE
+        if SELECT_SINGLE_TEST:
+            if file != 1:
+                continue
+            else:
+                print("file 1")
+
         # Load the CSV file
         df = pd.read_csv(file_path)
 
@@ -577,15 +646,16 @@ def merge_dataset_extr_int(x, vy):
 
 
     plt.figure(figsize=(10, 5))
-    lab1 ='instant'
-    lab2 ='instant + windowed'
-    lab3 ='quantized'
-    lab4 ='quantized + windowed'
+    lab1 ='instant vy'
+    lab2 ='instant vy + windowed OF'
+    lab3 ='quantized vy'
+    lab4 ='quantized vy + windowed OF'
+    size = 1
 
-    plt.scatter(all_z_4_MRU, all_dist_4_MRU, label= lab1, marker="v", alpha=0.3, s=3)
-    plt.scatter(all_z_4_MRU_w, all_dist_4_MRU_w, label= lab2, marker="x", alpha=0.3, s=3)
-    plt.scatter(all_z_4_MRU_quant, all_dist_4_MRU_quant, label= lab3, marker="s", alpha=0.3, s=3)
-    plt.scatter(all_z_4_MRU_quant_w, all_dist_4_MRU_quant_w, label= lab4, marker="o", alpha=0.3, s=3)
+    plt.scatter(all_z_4_MRU, all_dist_4_MRU, label= lab1, marker="v", alpha=0.3, s=size)
+    plt.scatter(all_z_4_MRU_w, all_dist_4_MRU_w, label= lab2, marker="x", alpha=0.3, s=size)
+    plt.scatter(all_z_4_MRU_quant, all_dist_4_MRU_quant, label= lab3, marker="s", alpha=0.3, s=size)
+    plt.scatter(all_z_4_MRU_quant_w, all_dist_4_MRU_quant_w, label= lab4, marker="o", alpha=0.3, s=size)
 
     # Plot relationships
 
@@ -674,7 +744,7 @@ def modello(x, costante):
     return costante / x
 
 
-def compute_dz(Vx, Vx_prime, fx, fy, cx, cy):
+def compute_dz(Vx, Vx_prime, fx):
     """
     Compute the change in depth (dz) based on optical flow.
 
@@ -801,15 +871,17 @@ def windowing_vs_uncertanty(file_path):
             plt.grid(True)
             plt.ylim(0, 2.1)
 
+
             # Additional plot
             Y_theoretical = []
             for i in range(len(Vx_prime_values)):
-                dzi = compute_dz(float(key), Vx_prime_values[i], fx, fy, cx, cy)
+                dzi = compute_dz(float(key), Vx_prime_values[i], fx)
                 Y_theoretical.append(dzi)
 
             plt.plot(Vx_prime_values, Y_theoretical, color="grey", label='Theoretical Model Dz = (V_r * fx)/OF')
 
             # Calculate systematic error
+
             residuals = (y - Y_theoretical) / y
             systematic_error = np.mean(residuals)
 
@@ -908,6 +980,7 @@ def show_result_ex_file(file_path):
     sub_dataframes = {key: groups.get_group(key) for key in groups.groups}
 
     for key, value in sub_dataframes.items():
+        print("VELOCITY : ", key)
         data = sub_dataframes[key]
 
         # Define colors for different values of 'vx_3D'
@@ -924,7 +997,7 @@ def show_result_ex_file(file_path):
         x = [element * 60 for element in x_fps]
         y = data['z_mean']
 
-        SMOOTHING = 0
+        SMOOTHING = 1
         window = 0
 
         if SMOOTHING:
@@ -948,11 +1021,15 @@ def show_result_ex_file(file_path):
 
         Vx_prime_values = sorted(x)
 
+
         # Fit the model to the data
         params, cov = curve_fit(modello, x, y)
 
+
+
         # Extract the estimated constant
         estimated_constant = params[0]
+        bland_altman_plot(x, y, estimated_constant, "results")
 
         # Calculate the uncertainty associated with the constant
         constant_uncertainty = np.sqrt(np.diag(cov))[0]
@@ -970,13 +1047,14 @@ def show_result_ex_file(file_path):
         # Save the data to the file
         save_to_file_OF_results("constant.txt", estimated_constant, constant_uncertainty, key)
 
-        # Create the plot
-        plt.figure(figsize=(12, 6))
+
+
+
 
         # Additional plot
         Y_theoretical = []
         for i in range(len(Vx_prime_values)):
-            dzi = compute_dz(float(key), Vx_prime_values[i], fx, fy, cx, cy)
+            dzi = compute_dz(float(key), Vx_prime_values[i], fx)
             Y_theoretical.append(dzi)
 
         # Calculate the minimum distance for each experimental point
@@ -999,11 +1077,14 @@ def show_result_ex_file(file_path):
         data['min_distance'] = min_distances
 
         # Display the results
-        print(data[['x', 'y', 'min_distance']])
+        #print(data[['x', 'y', 'min_distance']])
 
         # Calculate the mean absolute error (MAE)
         mae = np.mean(min_distances)
         print(f'Mean Absolute Error: {mae:.4f}')
+
+        # Create the plot
+        plt.figure(figsize=(8, 6))
 
         # Prepare the data
         data = pd.DataFrame({
@@ -1027,7 +1108,7 @@ def show_result_ex_file(file_path):
         })
 
         # Plot raw data points and the model
-        sns.scatterplot(x='x', y='y', data=data, label='Raw Data', color=color_p, s=50, alpha=0.7, marker="^",
+        sns.scatterplot(x='x', y='y', data=data, label='Raw Data', color=color_p, s=50, alpha=0.3, marker="^",
                         edgecolor="black")
         sns.lineplot(x='x_model', y='y_model', data=data, label=r'Experimental model $d = k_{{exp}}/v_{{px}}$',
                      color='black', linestyle='-.')
@@ -1910,8 +1991,11 @@ if EXPERIMENTAL_MODEL_FITTING:
     # Function to show results from the experimental file
     show_result_ex_file(file_path_1)
 
-    # Function to perform windowing analysis and calculate uncertainties
-    windowing_vs_uncertanty(file_path_1)
+    ANALYZE_WINDOW_UNCERTANTY = 0
+    if ANALYZE_WINDOW_UNCERTANTY:
+
+        # Function to perform windowing analysis and calculate uncertainties
+        windowing_vs_uncertanty(file_path_1)
 
 # Flag for evaluating experimental K constants from the model at different reference speeds
 EXP_Ks_RESULTS_EVALUATION = 0
