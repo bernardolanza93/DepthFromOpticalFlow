@@ -9,6 +9,255 @@ from sklearn.cluster import KMeans
 
 DISCARD_HIGH_SPEED  = 0
 MAX_SPEED=0.70
+SHOW_STAIRCASE_ROBOT = 0
+SHOW_FILTRATION_SIGNAL_OF = 0
+
+
+def plot_sigma_histograms(updated_dfs):
+    """
+    Per ogni DataFrame nel dizionario 'updated_dfs', genera un istogramma di sigma_0
+    e calcola il valore medio di sigma_0. Mostra 5 istogrammi e calcola 5 medie.
+
+    Parametri:
+    - updated_dfs: dizionario con DataFrame per ogni velocità, contenente i valori di K e sigma_0
+
+    Ritorna:
+    - Un dizionario con il valore medio di sigma_0 per ogni velocità.
+    """
+
+    sigma_means = {}  # Dizionario per salvare i valori medi di sigma_0 per ogni velocità
+
+    # Itera su ogni DataFrame nel dizionario delle velocità
+    for velocity_key, velocity_df in updated_dfs.items():
+        # Estrai i valori di sigma_0 dal DataFrame
+        sigma_0_values = velocity_df['sigma_0'].values
+
+        # Calcola il valore medio di sigma_0 per questa velocità
+        sigma_mean = np.mean(sigma_0_values)
+        sigma_means[velocity_key] = sigma_mean  # Salva la media per questa velocità
+
+        # Plot dell'istogramma di sigma_0
+        plt.figure(figsize=(8, 6))
+        plt.hist(sigma_0_values, bins=20, color='skyblue', edgecolor='black')
+        plt.title(f'Istogramma di $\\sigma_0$ - Velocity: {velocity_key}')
+        plt.xlabel('$\\sigma_0$')
+        plt.ylabel('Frequenza')
+        plt.grid(True)
+        plt.show()
+
+        # Stampa la media di sigma_0
+        print(f'Valore medio di $\\sigma_0$ per la velocità {velocity_key}: {sigma_mean:.4f}')
+
+    return sigma_means
+
+
+def hyperbolic_model(vx, K):
+    return K / vx
+
+def calculate_sigma(residuals, m, n):
+    """Calculates standard deviation of residuals (sigma_0)."""
+    return np.sqrt(np.sum(residuals**2) / (m - n))
+
+
+def estimate_k_and_sigma0(velocity_simulations_dfs):
+    """
+     Per ogni DataFrame nelle simulazioni delle velocità, fitta il modello z = K * vx
+     per ogni riga, calcola K, calcola i residui, e aggiungi il valore di K e sigma_0
+     in due nuove colonne per ogni DataFrame.
+
+     Parametri:
+     - velocity_simulations_dfs: dizionario con DataFrame per ogni velocità
+
+     Ritorna:
+     - Un dizionario con DataFrame aggiornati, dove ogni DataFrame ha 2 nuove colonne:
+       'K' e 'sigma_0'
+     """
+
+    # Dizionario per salvare i DataFrame aggiornati
+    updated_dfs = {}
+
+    # Itera su ogni DataFrame nel dizionario delle simulazioni delle velocità
+    for velocity_key, velocity_df in velocity_simulations_dfs.items():
+        # Liste per salvare K e sigma_0 per ogni riga
+        k_values = []
+        sigma_0_values = []
+
+        # Itera su ogni riga del DataFrame (ogni riga è una simulazione)
+        for index, row in velocity_df.iterrows():
+            # Estrai i 20 valori di vx e i 20 valori di z da questa riga
+            vx_sim = row[[f'vx_{i + 1}' for i in range(20)]].values
+            z_sim = row[[f'z_{i + 1}' for i in range(20)]].values
+
+            # Fitta il modello z = K * vx usando curve_fit
+            popt, _ = curve_fit(hyperbolic_model, vx_sim, z_sim)
+            K_estimated = popt[0]  # Il valore stimato di K
+
+
+            # Calcola i residui (differenza tra z_sim e il modello predetto)
+            z_model = hyperbolic_model(vx_sim, K_estimated)
+            residuals = z_sim - z_model
+
+            # Calcola sigma_0 (deviazione standard dei residui)
+            sigma_0 = calculate_sigma(residuals, m=len(vx_sim), n=1)
+
+            # Aggiungi K e sigma_0 alle liste
+            k_values.append(K_estimated)
+            sigma_0_values.append(sigma_0)
+
+            DRAW_CURE_FIT = 0
+            if DRAW_CURE_FIT:
+
+
+                # Genera 50 valori di vx tra il minimo e il massimo dei valori reali
+                vx_fitted = np.linspace(vx_sim.min(), vx_sim.max(), 50)
+                z_fitted = hyperbolic_model(vx_fitted, K_estimated)  # Calcola i valori z teorici
+
+                # Plot dei dati e della curva stimata con i 50 punti
+                plt.figure(figsize=(8, 6))
+                plt.scatter(vx_sim, z_sim, color='blue', label='Data points')
+                plt.plot(vx_fitted, z_fitted, color='red', label=f'Fitted curve: K={K_estimated:.2f}')
+                plt.title(f'Simulation {index + 1} - Velocity: {velocity_key}')
+                plt.xlabel('vx')
+                plt.ylabel('z')
+                plt.legend()
+                plt.grid(True)
+                plt.show()
+
+        # Aggiungi le nuove colonne 'K' e 'sigma_0' al DataFrame corrente
+        velocity_df['K'] = k_values
+        velocity_df['sigma_0'] = sigma_0_values
+
+        # Salva il DataFrame aggiornato nel dizionario
+        updated_dfs[velocity_key] = velocity_df
+        #print(velocity_df)
+
+    return updated_dfs
+
+
+def generate_montecarlo_new_data_and_analyze(result_dict, num_simulations=1000):
+    """
+    Esegue simulazioni Monte Carlo per ogni velocità. Per ogni velocità genera 20 punti usando
+    le rispettive medie (mu) e deviazioni standard (sigma) per z_mean e vx, moltiplica tutte le vx per 60,
+    quindi restituisce un dizionario con un DataFrame per ogni velocità.
+
+    Parametri:
+    - result_dict: dizionario contenente mu e sigma per ogni cluster (marker, prova, velocità)
+    - num_simulations: numero di simulazioni Monte Carlo da eseguire per ogni cluster
+
+    Ritorna:
+    - Un dizionario con una chiave per ogni velocità e un DataFrame per ogni velocità, contenente 40 colonne
+      (20 vx_sim e 20 z_sim) e una riga per ogni simulazione.
+    """
+
+    # Trova tutte le velocità uniche nel dizionario
+    velocities = set([float(key.split('_')[3]) for key in result_dict.keys()])
+
+    # Dizionario per salvare un DataFrame per ogni velocità
+    velocity_simulations_dfs = {}
+
+    # Itera su ogni velocità
+    for velocity in velocities:
+        # Filtra i cluster per la velocità target
+        filtered_clusters = {key: val for key, val in result_dict.items() if f'vx3D_{velocity}' in key}
+
+        # Lista per salvare tutte le simulazioni per la velocità corrente (che diventerà un DataFrame)
+        all_simulations = []
+
+        # Esegui num_simulations simulazioni Monte Carlo
+        for sim_num in range(num_simulations):
+            # Liste per salvare i dati simulati per la velocità corrente
+            vx_simulated = []
+            z_simulated = []
+
+            # Itera su ogni cluster (ci sono 20 per ogni velocità)
+            for key, stats in filtered_clusters.items():
+                # Estrai mu e sigma per z_mean e vx, e moltiplica vx_mu per 60
+                z_mean_mu = stats['z_mean_mu']
+                z_mean_sigma = stats['z_mean_sigma']
+                vx_mu = stats['vx_mu']  # Moltiplica vx_mu per 60
+                vx_sigma = stats['vx_sigma']
+
+                # Genera un singolo valore simulato per vx e z_mean
+                vx_sim = np.random.normal(vx_mu, vx_sigma)
+                z_sim = np.random.normal(z_mean_mu, z_mean_sigma)
+
+                # Aggiungi i valori simulati alle rispettive liste
+                vx_simulated.append(vx_sim)
+                z_simulated.append(z_sim)
+
+            DRAW = 0
+            if DRAW:
+                # Plot dei 20 punti simulati
+                plt.figure(figsize=(8, 6))
+                plt.scatter(vx_simulated, z_simulated, alpha=0.7)
+                plt.title(f'Simulazione Monte Carlo #{sim_num + 1} per velocità {velocity}')
+                plt.xlabel('vx simulato')
+                plt.ylabel('z_mean simulato')
+                plt.grid(True)
+                plt.show()
+
+            # Crea una riga di risultati concatenando vx_sim e z_sim in un'unica lista
+            simulation_row = np.concatenate([vx_simulated, z_simulated])
+
+            # Aggiungi la riga alla lista di tutte le simulazioni per questa velocità
+            all_simulations.append(simulation_row)
+
+        # Definisci i nomi delle colonne: vx_1, vx_2, ..., vx_20, z_1, z_2, ..., z_20
+        column_names = [f'vx_{i + 1}' for i in range(20)] + [f'z_{i + 1}' for i in range(20)]
+
+        # Trasforma le simulazioni in un DataFrame per questa velocità
+        velocity_df = pd.DataFrame(all_simulations, columns=column_names)
+
+        # Salva il DataFrame per questa velocità nel dizionario
+        velocity_simulations_dfs[f'velocity_{velocity}'] = velocity_df
+
+
+        #print(velocity_simulations_dfs)
+
+    return velocity_simulations_dfs
+
+
+
+def extract_mu_and_sigma_from_marker(file_path):
+    df = pd.read_excel(file_path)
+
+    # Trasforma la colonna 'vx' in valore assoluto
+    df['vx'] = df['vx'].abs() * 60
+
+    # Display the first few rows of the dataset to understand its structure
+    df.head()
+
+    # Raggruppa i dati per 'marker', 'vx_3D', 'prova'
+    grouped = df.groupby(['marker', 'vx_3D', 'prova'])
+
+    # Crea un dizionario per salvare i risultati
+    results = {}
+
+    # Itera su ogni gruppo e calcola media e deviazione standard per z_mean e vx
+    for name, group in grouped:
+        marker = name[0]
+        vx_3D = name[1]
+        prova = name[2]
+
+        z_mean_mu = group['z_mean'].mean()
+        z_mean_sigma = group['z_mean'].std()
+
+        vx_mu = group['vx'].mean()
+        vx_sigma = group['vx'].std()
+
+        # Crea una chiave unica per ogni cluster
+        key = f'marker_{marker}_vx3D_{vx_3D}_prova_{prova}'
+
+        # Salva i risultati in un dizionario
+        results[key] = {
+            'z_mean_mu': z_mean_mu,
+            'z_mean_sigma': z_mean_sigma,
+            'vx_mu': vx_mu,
+            'vx_sigma': vx_sigma
+        }
+
+
+    return results
 
 
 def bland_altman_plot(x, y, k, save_path, file_name="bland_altman_plot.png"):
@@ -61,47 +310,41 @@ def bland_altman_plot(x, y, k, save_path, file_name="bland_altman_plot.png"):
     plt.savefig(save_file)
     plt.close()
 
-def convert_robot_in_staircase_signal(noisy_signal):
-
+def convert_robot_in_staircase_signal(noisy_signal, quantization_levels = v_all):
+    # Interpolazione dei vuoti (se ci sono NaN)
+    noisy_signal = pd.Series(noisy_signal).interpolate().tolist()
 
     # Applica un filtro passa basso per ridurre il rumore
     b, a = signal.butter(3, 0.05)
-    filtered_signal = signal.filtfilt(b, a, noisy_signal)
+    smoothed_signal = signal.filtfilt(b, a, noisy_signal)
 
-    # Usa K-means per trovare i livelli dei gradini
-    n_clusters = 5  # Numero di gradini attesi
-    kmeans = KMeans(n_clusters=n_clusters)
-    filtered_signal_reshaped = filtered_signal.reshape(-1, 1)
-    kmeans.fit(filtered_signal_reshaped)
-    cluster_centers = kmeans.cluster_centers_.flatten()
-    labels = kmeans.labels_
+    # Aggiungi lo zero ai livelli di quantizzazione
+    quantization_levels = np.array([0] + quantization_levels)
 
-    # Crea il segnale quantizzato basato sui cluster
-    quantized_signal = np.zeros_like(filtered_signal)
-    for i in range(n_clusters):
-        quantized_signal[labels == i] = cluster_centers[i]
+    # Funzione per quantizzare i valori
+    def quantize(value, levels):
+        idx = np.argmin(np.abs(levels - value))
+        return levels[idx]
 
-    # Imposta a zero le parti che non corrispondono ai livelli quantizzati
-    differences = np.abs(np.diff(quantized_signal))
-    change_points = np.where(differences > np.mean(differences) * 0.5)[0] + 1  # 0.5 può essere aggiustato
-    clean_signal = np.copy(quantized_signal)
-    for start, end in zip(change_points[:-1], change_points[1:]):
-        if end - start < 10:  # Ignora cambiamenti troppo piccoli, 10 può essere aggiustato
-            clean_signal[start:end] = 0
+    # Quantizza il segnale smussato
+    quantized_signal = np.array([quantize(val, quantization_levels) for val in smoothed_signal])
 
-#    Visualizza il risultato
-#     plt.figure(figsize=(15, 6))
-#     plt.plot(noisy_signal, label='Noisy Signal', linestyle='--', alpha=0.5)
-#     plt.plot(filtered_signal, label='Filtered Signal', alpha=0.75)
-#     plt.plot(clean_signal, label='Quantized Signal', linewidth=2)
-#     #plt.plot(clean_signal, label='Clean Signal', linewidth=2, color='green')
-#     plt.xlabel('Sample')
-#     plt.ylabel('Amplitude')
-#     plt.title('Step Signal with Noise Filtering and Quantization')
-#     plt.legend()
-#     plt.grid(True)
-#     plt.show()
-    return clean_signal
+
+    if SHOW_STAIRCASE_ROBOT:
+
+
+        plt.figure(figsize=(15, 6))
+        plt.plot(noisy_signal, label='Noisy Signal', linestyle='--', alpha=0.5)
+        plt.plot(smoothed_signal, label='Smoothed Signal', alpha=0.75)
+        plt.plot(quantized_signal, label='Quantized Signal', linewidth=2)
+        plt.xlabel('Sample')
+        plt.ylabel('Amplitude')
+        plt.title('Step Signal with Smoothing and Quantization')
+        plt.legend()
+        plt.grid(True)
+        plt.show()
+
+    return quantized_signal
 
 
 def filter_steady_state_speed(data_frame, vel_robot, window_size=13, slope_threshold=0.001, percentile_threshold=35, min_continuous_length=None):
@@ -182,27 +425,30 @@ def filter_steady_state_speed(data_frame, vel_robot, window_size=13, slope_thres
     filtered_data_frame = data_frame.loc[filtered_indices].reset_index(drop=True)
     filtered_vel_robot = [vel_robot[i] for i in filtered_indices]
 
-    #Plot before and after filtering
-    # plt.figure(figsize=(12, 6))
-    #
-    # plt.subplot(2, 1, 1)
-    # plt.plot(original_vel_robot, label='Original Velocity')
-    # plt.xlabel('Index')
-    # plt.ylabel('Velocity')
-    # plt.title('Robot Velocity - Original')
-    # plt.legend()
-    #
-    # plt.subplot(2, 1, 2)
-    # plt.scatter(range(len(filtered_vel_robot)), [elemento * 30 for elemento in filtered_vel_robot], label='Filtered Velocity', color='orange', s=10)
-    # plt.scatter(range(len(filtered_data_frame["9_vx"])), filtered_data_frame["9_vx"], label='of', color='black', s=10)
-    #
-    # plt.xlabel('Index')
-    # plt.ylabel('Velocity')
-    # plt.title('Robot Velocity - Filtered')
-    # plt.legend()
-    #
-    # plt.tight_layout()
-    # plt.show()
+
+    if SHOW_FILTRATION_SIGNAL_OF:
+
+       # Plot before and after filtering
+        plt.figure(figsize=(12, 6))
+
+        plt.subplot(2, 1, 1)
+        plt.plot(original_vel_robot, label='Original Velocity')
+        plt.xlabel('Index')
+        plt.ylabel('Velocity')
+        plt.title('ROBOT ISTANTANEO')
+        plt.legend()
+
+        plt.subplot(2, 1, 2)
+        plt.scatter(range(len(filtered_vel_robot)), [elemento * 30 for elemento in filtered_vel_robot], label='Filtered Velocity', color='orange', s=10)
+        plt.scatter(range(len(filtered_data_frame["9_vx"])), filtered_data_frame["9_vx"], label='of', color='black', s=10)
+
+        plt.xlabel('Index')
+        plt.ylabel('Velocity')
+        plt.title('ROBOT ISTNATANEO FILTRATO E OF TAGLIATO A CONFRONTO')
+        plt.legend()
+
+        plt.tight_layout()
+        plt.show()
 
     return filtered_data_frame, filtered_vel_robot
 def find_signal_boundaries(signal, threshold=0.1):
@@ -279,6 +525,13 @@ def calculate_theo_model_and_analyze(n_df, n_vy, win, vlim):
     for vx_col, z_col in zip(vx_columns, z_columns):
         # Smooth the data
         smoothed_vx = n_df[vx_col].rolling(window=win).mean()
+        # if win > 1:
+        #     plt.plot(n_df[vx_col])
+        #     plt.plot(smoothed_vx)
+        #
+        #     plt.show()
+
+
         n_df[vx_col] = smoothed_vx
 
         dist = []
@@ -367,7 +620,7 @@ def merge_dataset_extr_int(x, vy):
         #4 medio buono
 
         file += 1
-        SELECT_SINGLE_TEST = 1
+        SELECT_SINGLE_TEST = 0
 
         #POSSIBILITÀ ANCHE DI IMPLEMENTARE UNA SOGLIA DI VELOCITÀ PER ESCLUDERE PROVE CATTIVE
         if SELECT_SINGLE_TEST:
@@ -621,16 +874,18 @@ def merge_dataset_extr_int(x, vy):
         n_df_MRU_quant, n_vy_MRU_quant = filter_steady_state_speed(n_df, n_vy_quant,10,0.05,35,35)
         print("filtration:",len(n_vy_MRU)," / ",len(n_vy))
 
+        window_finel = 4
+
         print("INSTANT")
         all_z_filtered, all_distance_filtered = calculate_theo_model_and_analyze(n_df_MRU, n_vy_MRU, 1, 0.2)
         print("INSTANT wind")
 
-        all_z_filtered_w, all_distance_filtered_w = calculate_theo_model_and_analyze(n_df_MRU, n_vy_MRU, 3, 0.2)
+        all_z_filtered_w, all_distance_filtered_w = calculate_theo_model_and_analyze(n_df_MRU, n_vy_MRU, window_finel, 0.2)
         print("QUANT")
 
         all_z_filtered_quant, all_distance_filtered_quant = calculate_theo_model_and_analyze(n_df_MRU_quant, n_vy_MRU_quant, 1, 0.2)
         print("QUANT win")
-        all_z_filtered_quant_w, all_distance_filtered_quant_w = calculate_theo_model_and_analyze(n_df_MRU_quant, n_vy_MRU_quant, 3, 0.2)
+        all_z_filtered_quant_w, all_distance_filtered_quant_w = calculate_theo_model_and_analyze(n_df_MRU_quant, n_vy_MRU_quant, window_finel, 0.2)
 
         all_dist_4_MRU_quant.extend(all_distance_filtered_quant)
         all_z_4_MRU_quant.extend(all_z_filtered_quant)
@@ -644,34 +899,70 @@ def merge_dataset_extr_int(x, vy):
         all_dist_4_MRU_w.extend(all_distance_filtered_w)
         all_z_4_MRU_w.extend(all_z_filtered_w)
 
+    # Imposta lo stile di Seaborn
+    sns.set(style="whitegrid")
 
-    plt.figure(figsize=(10, 5))
-    lab1 ='instant vy'
-    lab2 ='instant vy + windowed OF'
-    lab3 ='quantized vy'
-    lab4 ='quantized vy + windowed OF'
-    size = 1
+    # Etichette
+    lab1 = 'instant vy'
+    lab2 = 'instant vy + windowed OF'
+    lab3 = 'quantized vy'
+    lab4 = 'quantized vy + windowed OF'
+    size = 10  # Aumentato per migliorare la visibilità
 
-    plt.scatter(all_z_4_MRU, all_dist_4_MRU, label= lab1, marker="v", alpha=0.3, s=size)
-    plt.scatter(all_z_4_MRU_w, all_dist_4_MRU_w, label= lab2, marker="x", alpha=0.3, s=size)
-    plt.scatter(all_z_4_MRU_quant, all_dist_4_MRU_quant, label= lab3, marker="s", alpha=0.3, s=size)
-    plt.scatter(all_z_4_MRU_quant_w, all_dist_4_MRU_quant_w, label= lab4, marker="o", alpha=0.3, s=size)
-
-    # Plot relationships
-
-
-
+    # Variabili comuni
+    al = 0.3
     min_val = min(min(all_z_filtered), min(all_distance_filtered))
     max_val = max(max(all_z_filtered), max(all_distance_filtered))
-    plt.plot([0, max_val], [0, max_val], 'r--', label='Perfect Prediction (y = x)')
+    xlims = (0.2, 2.5)
+    ylims = (0.2, 2.5)
 
-    plt.xlabel('Real')
-    plt.ylabel('Predicted')
-    plt.title('Relationship between VX, Distance, and Z')
-    plt.xlim(0.2,2.5)
-    plt.ylim(0.2, 2.5)
-    plt.legend()
-    plt.grid(True)
+    # Definire i colori
+    colors = sns.color_palette("tab10", 4)
+
+    # Funzione per calcolare R^2 e RMSE
+    def calculate_metrics(true_values, predictions):
+        r2 = r2_score(true_values, predictions)
+        rmse = np.sqrt(mean_squared_error(true_values, predictions))
+        return r2, rmse
+
+    # Calcolare i valori di R^2 e RMSE per ciascun dataset
+    r2_1, rmse_1 = calculate_metrics(all_z_4_MRU, all_dist_4_MRU)
+    r2_2, rmse_2 = calculate_metrics(all_z_4_MRU_w, all_dist_4_MRU_w)
+    r2_3, rmse_3 = calculate_metrics(all_z_4_MRU_quant, all_dist_4_MRU_quant)
+    r2_4, rmse_4 = calculate_metrics(all_z_4_MRU_quant_w, all_dist_4_MRU_quant_w)
+
+    # Creare la figura con 4 subplots
+    fig, axs = plt.subplots(2, 2, figsize=(12, 10))
+    plt.subplots_adjust(hspace=0.4, wspace=0.4)
+
+    # Funzione per creare i plot di regressione
+    def plot_regression(ax, x, y, label, marker, color, r2, rmse):
+        ax.scatter(x, y, label=label, marker=marker, alpha=al, s=size, color=color)
+        ax.plot([0, max_val], [0, max_val], 'r--', label='Perfect Prediction (y = x)')
+        ax.set_xlim(xlims)
+        ax.set_ylim(ylims)
+        ax.set_xlabel('Real')
+        ax.set_ylabel('Predicted')
+        ax.set_title(f'{label} (R^2={r2:.2f}, RMSE={rmse:.2f})')
+        ax.grid(True)
+        ax.legend()
+
+    # Primo subplot
+    plot_regression(axs[0, 0], all_z_4_MRU, all_dist_4_MRU, lab1, "v", colors[0], r2_1, rmse_1)
+
+    # Secondo subplot
+    plot_regression(axs[0, 1], all_z_4_MRU_w, all_dist_4_MRU_w, lab2, "x", colors[1], r2_2, rmse_2)
+
+    # Terzo subplot
+    plot_regression(axs[1, 0], all_z_4_MRU_quant, all_dist_4_MRU_quant, lab3, "s", colors[2], r2_3, rmse_3)
+
+    # Quarto subplot
+    plot_regression(axs[1, 1], all_z_4_MRU_quant_w, all_dist_4_MRU_quant_w, lab4, "o", colors[3], r2_4, rmse_4)
+
+    # Impostare il titolo principale della figura
+    fig.suptitle('Regression Plots with R^2 and RMSE', fontsize=16)
+
+    # Mostrare il plot
     plt.show()
 
     # Convertire le liste in array numpy
@@ -687,44 +978,57 @@ def merge_dataset_extr_int(x, vy):
     all_z_4_MRU_w = np.array(all_z_4_MRU_w)
     all_dist_4_MRU_w = np.array(all_dist_4_MRU_w)
 
-
-    #hist
-    # Creazione degli istogrammi
-    # Creazione degli istogrammi con curve normali
-    plt.figure(figsize=(10, 5))
-
     # Calcolare gli errori e le statistiche
     errors_MRU = all_dist_4_MRU - all_z_4_MRU
     errors_MRU_quant = all_dist_4_MRU_quant - all_z_4_MRU_quant
     errors_MRU_quant_w = all_dist_4_MRU_quant_w - all_z_4_MRU_quant_w
     errors_MRU_w = all_dist_4_MRU_w - all_z_4_MRU_w
 
-    # Creare gli istogrammi
-    plt.hist(errors_MRU, bins=30, alpha=0.5, label=lab1, density=True)
-    plt.hist(errors_MRU_quant, bins=30, alpha=0.5, label=lab2, density=True)
-    plt.hist(errors_MRU_quant_w, bins=30, alpha=0.5, label=lab3, density=True)
-    plt.hist(errors_MRU_w, bins=30, alpha=0.5, label=lab4, density=True)
+    # Definire i colori
+    colors = sns.color_palette("tab10", 4)
 
-    # Calcolare le curve normali
+    # Creare la figura con 4 subplots
+    fig, axs = plt.subplots(2, 2, figsize=(12, 10))
+    plt.subplots_adjust(hspace=0.4, wspace=0.4)
+
+    # Funzione per creare gli istogrammi e le curve normali
+    def plot_hist_and_norm(ax, errors, mean, std, label, color):
+        sns.histplot(errors, bins=30, kde=False, color=color, stat='density', ax=ax,label=f'{label} ($\sigma={std:.2f}$m)')
+        x = np.linspace(-1, 1, 100)
+        ax.plot(x, norm.pdf(x, mean, std), color=color)
+        ax.set_xlim(-1, 1)
+        ax.set_ylim(0, 7)
+        ax.set_xlabel('Error [m]')
+        ax.set_ylabel('Frequency')
+        ax.legend()
+        ax.grid(True)
+
+    # Calcolare le statistiche
     mean_MRU, std_MRU = np.mean(errors_MRU), np.std(errors_MRU)
     mean_MRU_quant, std_MRU_quant = np.mean(errors_MRU_quant), np.std(errors_MRU_quant)
     mean_MRU_quant_w, std_MRU_quant_w = np.mean(errors_MRU_quant_w), np.std(errors_MRU_quant_w)
     mean_MRU_w, std_MRU_w = np.mean(errors_MRU_w), np.std(errors_MRU_w)
 
-    x = np.linspace(-1, 1, 100)
-    plt.plot(x, norm.pdf(x, mean_MRU, std_MRU), label=f'{lab1} ($\sigma={std_MRU:.2f}$m)')
-    plt.plot(x, norm.pdf(x, mean_MRU_w, std_MRU_w), label=f'{lab2} ($\sigma={std_MRU_w:.2f}$m)')
+    # Primo subplot
+    plot_hist_and_norm(axs[0, 0], errors_MRU, mean_MRU, std_MRU, lab1, colors[0])
+    axs[0, 0].set_title(lab1)
 
-    plt.plot(x, norm.pdf(x, mean_MRU_quant, std_MRU_quant), label=f' {lab3} ($\sigma={std_MRU_quant:.2f}$m)')
-    plt.plot(x, norm.pdf(x, mean_MRU_quant_w, std_MRU_quant_w), label=f'{lab4} ($\sigma={std_MRU_quant_w:.2f}$m)')
+    # Secondo subplot
+    plot_hist_and_norm(axs[0, 1], errors_MRU_w, mean_MRU_w, std_MRU_w, lab2, colors[1])
+    axs[0, 1].set_title(lab2)
 
+    # Terzo subplot
+    plot_hist_and_norm(axs[1, 0], errors_MRU_quant, mean_MRU_quant, std_MRU_quant, lab3, colors[2])
+    axs[1, 0].set_title(lab3)
 
+    # Quarto subplot
+    plot_hist_and_norm(axs[1, 1], errors_MRU_quant_w, mean_MRU_quant_w, std_MRU_quant_w, lab4, colors[3])
+    axs[1, 1].set_title(lab4)
 
-    plt.xlabel('Error (Predicted - Real)')
-    plt.ylabel('Frequency')
-    plt.title(f'Error Distribution with Normal Curves and Sigma in Meters')
-    plt.legend()
-    plt.grid(True)
+    # Impostare il titolo principale della figura
+    fig.suptitle('Error Distribution with Normal Curves and Sigma in Meters', fontsize=16)
+
+    # Mostrare il plot
     plt.show()
 
 
@@ -1393,12 +1697,12 @@ def synchro_data_v_v_e_z(file_raw_optics):
     Returns:
     tuple: Synchronized timestamps and smoothed velocity data.
     """
-    # Plot of all three CSV files
+    # # Plot of all three CSV files
     # plot_increment("data_robot_encoder/1b.csv", label='1b')
-    # plot_increment("data_robot_encoder/2b.csv", label='2b')
-    # plot_increment("data_robot_encoder/4b.csv", label='4b')
-
-    # Plot settings
+    # #plot_increment("data_robot_encoder/2b.csv", label='2b')
+    # #plot_increment("data_robot_encoder/4b.csv", label='4b')
+    #
+    # # Plot settings
     # plt.title('Translation X increment normalized to meters per second')
     # plt.xlabel('Time [s]')
     # plt.ylabel('Velocity [m/s]')
@@ -1540,14 +1844,14 @@ def synchro_data_v_v_e_z(file_raw_optics):
     mean_velocity_smoothed_series = pd.Series(mean_velocity_smoothed)
     mean_velocity_smoothed_interpolated = mean_velocity_smoothed_series.interpolate(method='linear').to_numpy()
 
-    # plt.scatter(x_smoothed, mean_velocity_smoothed_interpolated, label='Smoothed Mean Velocity', s=3)
-    #
-    #
-    # plt.xlabel('Time')
-    # plt.ylabel('Signal Value')
-    # plt.title('Signals sharing the x-axis')
-    # plt.legend()
-    # plt.show()
+    plt.scatter(common_timestamp, mean_position, label='Smoothed Mean Velocity', s=3)
+
+
+    plt.xlabel('Time')
+    plt.ylabel('Signal Value')
+    plt.title('Signals sharing the x-axis')
+    plt.legend()
+    plt.show()
 
     return x_smoothed, mean_velocity_smoothed_interpolated
 
@@ -1981,6 +2285,27 @@ if RAW_VIDEO_PROCESSING:
 # Uncomment the following line if intermediate conversion is needed independently
 # convert_position_to_speed()
 
+EXPERIMENTAL_MODEL_METROLOGICAL_ASSESTMENT = 1
+
+if EXPERIMENTAL_MODEL_METROLOGICAL_ASSESTMENT:
+
+    file_path_1 = 'dati_of/all_points_big_fix_speed.xlsx'
+
+
+    mu_sigma_dict_results = extract_mu_and_sigma_from_marker(file_path_1)
+
+    montecarlo_results = generate_montecarlo_new_data_and_analyze(mu_sigma_dict_results)
+
+
+    modelled_df = estimate_k_and_sigma0(montecarlo_results)
+
+    sigmas = plot_sigma_histograms(modelled_df)
+
+
+
+
+
+
 # Flag for performing experimental model fitting and graph generation
 EXPERIMENTAL_MODEL_FITTING = 0
 
@@ -2005,11 +2330,12 @@ if EXP_Ks_RESULTS_EVALUATION:
     constant_analisis()
 
 # Flag for synchronizing robot velocities and validating raw optical flow data
-RAW_ROBOT_AND_RAW_OPTICAL_FLOW_VALIDATION = 1
+RAW_ROBOT_AND_RAW_OPTICAL_FLOW_VALIDATION = 0
 
 if RAW_ROBOT_AND_RAW_OPTICAL_FLOW_VALIDATION:
     # Function to synchronize external velocities of the robot to ensure a reliable path
     x_s, vy_s = synchro_data_v_v_e_z("results_raw.xlsx")
+
 
     # Function to merge robot raw data with optical flow and depth information, synchronizing and validating the dataset
     merge_dataset_extr_int(x_s, vy_s)
