@@ -13,6 +13,120 @@ SHOW_STAIRCASE_ROBOT = 0
 SHOW_FILTRATION_SIGNAL_OF = 0
 
 
+
+def plot_all_simulated_values(modelled_df):
+    """
+    Per ogni DataFrame nelle simulazioni delle velocità 3D, stima K usando tutti i punti simulati
+    di v_px e z, e poi plotti i punti simulati e la curva stimata usando il modello z = K / v_px.
+    Inoltre, calcola il valore di sigma_0 (deviazione standard dei residui).
+
+    Parametri:
+    - modelled_df: dizionario con DataFrame per ogni velocità, contenente i valori di v_px, z_sim,
+                   K e sigma_0.
+
+    Ritorna:
+    - Nessun valore di ritorno, ma plotti i punti simulati e la curva stimata per ogni velocità.
+    """
+
+    for velocity_key, df in modelled_df.items():
+        # Ricava il numero di punti dinamicamente basandosi sulle colonne vx_sim
+        num_points = sum('vx_' in col for col in df.columns)
+
+        # Colleziona tutti i valori di v_px e z per stimare K
+        all_v_px = []
+        all_z_sim = []
+
+        for i in range(1, num_points + 1):
+            all_v_px.extend(df[f'vx_{i}'].values)  # Aggiungi i valori v_px_i
+            all_z_sim.extend(df[f'z_{i}'].values)  # Aggiungi i valori z_sim_i
+
+        all_v_px = np.array(all_v_px)
+        all_z_sim = np.array(all_z_sim)
+
+        # Stima K su tutti i punti simulati usando curve_fit
+        popt, _ = curve_fit(hyperbolic_model, all_v_px, all_z_sim)
+        K_estimated = popt[0]  # Valore stimato di K
+
+        # Calcola i residui come (z_sim - z_model)
+        z_model = hyperbolic_model(all_v_px, K_estimated)  # Modello z = K / v_px
+        residuals = all_z_sim - z_model  # Residui = z_sim - z_model
+
+        # Calcola sigma_0 (deviazione standard dei residui)
+        m = len(all_v_px)  # Numero totale di punti
+        sigma_0 = calculate_sigma(residuals, m, n=1)  # Calcola sigma_0
+
+        # Genera valori equidistanti di v_px tra il minimo e il massimo
+        v_px_fitted = np.linspace(all_v_px.min(), all_v_px.max(), 100)
+        z_fitted = hyperbolic_model(v_px_fitted, K_estimated)  # Calcola i valori z teorici
+
+        # Plot dei punti simulati (scatter) e della curva stimata (line)
+        plt.figure(figsize=(8, 6))
+        plt.scatter(all_v_px, all_z_sim, s=1, color='blue', marker="X", alpha=0.5, label='Punti simulati')
+        plt.plot(v_px_fitted, z_fitted, color='red', label=f'Curva stimata: K={K_estimated:.2f}')
+        plt.title(f'Tutti i punti simulati e il modello per la velocità: {velocity_key}')
+        plt.xlabel('$v_{px}$')
+        plt.ylabel('$z$')
+        plt.legend()
+        plt.grid(True)
+        plt.show()
+
+        # Stampa il valore di sigma_0
+        print(f'Sigma_0 per la velocità {velocity_key}: {sigma_0:.4f}')
+
+def analyze_clusters_sigma_vs_px_velocity(modelled_df):
+    """
+    Per ogni DataFrame che contiene i valori di K e sigma_0, calcola i residui rispetto
+    al modello z = K / v_px per ogni punto simulato. Fa la media dei residui per ogni colonna
+    (ossia per ogni simulazione), e plotta un grafico con v_px medio sull'asse x e residuo
+    medio sull'asse y.
+
+    Parametri:
+    - modelled_df: dizionario con DataFrame per ogni velocità, contenente i valori di v_px, z_sim,
+                   K e sigma_0.
+
+    Ritorna:
+    - Nessun valore di ritorno, ma plotta un grafico per ogni velocità.
+    """
+
+    for velocity_key, df in modelled_df.items():
+        # Numero di punti simulati (assumiamo 20)
+        num_points = sum('vx_' in col for col in df.columns)
+
+        # Liste per salvare i residui medi e v_px medi
+        mean_residuals = []
+        mean_v_px = []
+
+        # Itera su ogni coppia di colonne v_px e z_sim (ciascun punto simulato)
+        for i in range(1, num_points + 1):
+            v_px_sim = df[f'vx_{i}'].values  # Colonna dei valori v_px_i
+            z_sim = df[f'z_{i}'].values  # Colonna dei valori z_sim_i
+            K_values = df['K'].values  # Colonna dei valori K (uno per ogni riga)
+
+            # Calcola i residui: |z_sim - K / v_px_sim| per ogni simulazione (riga)
+            residuals = np.abs(z_sim - (K_values / v_px_sim))
+
+            # Calcola la media di tutti i v_px_i per questa colonna
+            mean_v = np.mean(v_px_sim)
+
+            # Salva il residuo medio (lo faremo alla fine dopo tutte le simulazioni)
+            mean_residual = np.mean(residuals)  # Media di tutti i residui per questo punto simulato
+            mean_residuals.append(mean_residual)
+            mean_v_px.append(mean_v)
+
+        # Plot del grafico per la velocità corrente
+        plt.figure(figsize=(8, 6))
+        plt.scatter(mean_v_px, mean_residuals, marker='o', color='b', label='Errore medio')
+        plt.title(f'Residui associati al punto medi vs $v_{{px}}$ per la velocità: {velocity_key}')
+        plt.xlabel('$v_{{px}}$ medio')
+        plt.ylabel('Residuo medio')
+        plt.grid(True)
+        plt.legend()
+        plt.show()
+
+
+
+
+
 def plot_sigma_histograms(updated_dfs):
     """
     Per ogni DataFrame nel dizionario 'updated_dfs', genera un istogramma di sigma_0
@@ -46,7 +160,7 @@ def plot_sigma_histograms(updated_dfs):
         plt.show()
 
         # Stampa la media di sigma_0
-        print(f'Valore medio di $\\sigma_0$ per la velocità {velocity_key}: {sigma_mean:.4f}')
+        print(f'Valore medio di $\\sigma_0$ per la velocità {velocity_key}: {sigma_mean:.4f} [m]')
 
     return sigma_means
 
@@ -134,7 +248,7 @@ def estimate_k_and_sigma0(velocity_simulations_dfs):
     return updated_dfs
 
 
-def generate_montecarlo_new_data_and_analyze(result_dict, num_simulations=1000):
+def generate_montecarlo_new_data_and_analyze(result_dict, num_simulations=100000):
     """
     Esegue simulazioni Monte Carlo per ogni velocità. Per ogni velocità genera 20 punti usando
     le rispettive medie (mu) e deviazioni standard (sigma) per z_mean e vx, moltiplica tutte le vx per 60,
@@ -218,14 +332,28 @@ def generate_montecarlo_new_data_and_analyze(result_dict, num_simulations=1000):
 
 
 
-def extract_mu_and_sigma_from_marker(file_path):
+def extract_mu_and_sigma_from_marker(file_path, apply_moving_average=True):
+    """
+    Estrae media e deviazione standard per 'z_mean' e 'v_px' da un file Excel.
+    Se 'apply_moving_average' è True, applica una media mobile a 3 elementi solo su 'v_px'.
+
+    Parametri:
+    - file_path: il percorso del file Excel
+    - apply_moving_average: flag per attivare/disattivare la media mobile su 'v_px'
+
+    Ritorna:
+    - Un dizionario con le medie e le deviazioni standard per ogni cluster.
+    """
+
+    # Legge il file Excel
     df = pd.read_excel(file_path)
 
-    # Trasforma la colonna 'vx' in valore assoluto
+    # Trasforma la colonna 'vx' in valore assoluto e moltiplica per 60
     df['vx'] = df['vx'].abs() * 60
 
-    # Display the first few rows of the dataset to understand its structure
-    df.head()
+    # Applica la media mobile a 3 elementi su 'vx' se la flag è attivata
+    if apply_moving_average:
+        df['vx'] = df['vx'].rolling(window=3, min_periods=1).mean()
 
     # Raggruppa i dati per 'marker', 'vx_3D', 'prova'
     grouped = df.groupby(['marker', 'vx_3D', 'prova'])
@@ -239,6 +367,7 @@ def extract_mu_and_sigma_from_marker(file_path):
         vx_3D = name[1]
         prova = name[2]
 
+        # Calcola la media e la deviazione standard per z_mean e vx
         z_mean_mu = group['z_mean'].mean()
         z_mean_sigma = group['z_mean'].std()
 
@@ -255,7 +384,6 @@ def extract_mu_and_sigma_from_marker(file_path):
             'vx_mu': vx_mu,
             'vx_sigma': vx_sigma
         }
-
 
     return results
 
@@ -2300,6 +2428,10 @@ if EXPERIMENTAL_MODEL_METROLOGICAL_ASSESTMENT:
     modelled_df = estimate_k_and_sigma0(montecarlo_results)
 
     sigmas = plot_sigma_histograms(modelled_df)
+
+    analyze_clusters_sigma_vs_px_velocity(modelled_df)
+
+    plot_all_simulated_values(modelled_df)
 
 
 
