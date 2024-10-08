@@ -13,6 +13,81 @@ SHOW_STAIRCASE_ROBOT = 0
 SHOW_FILTRATION_SIGNAL_OF = 0
 
 
+def calculate_video_dt_std(folder_path):
+    """
+    Calcola la media e la deviazione standard dei tempi di frame (delta_t) per ciascun video in una directory.
+
+    Parametri:
+    - folder_path: percorso della directory contenente i file video (.mp4).
+
+    Ritorna:
+    - Un dizionario con la media e la deviazione standard di delta_t per ogni video.
+    """
+    results = {}
+
+    # Itera su tutti i file .mp4 nella directory specificata
+    for file_name in os.listdir(folder_path):
+        if file_name.endswith('.MP4'):
+            video_path = os.path.join(folder_path, file_name)
+            print(f"Analizzando il video: {video_path}")
+
+            # Apri il video
+            cap = cv2.VideoCapture(video_path)
+
+            # Lista per memorizzare i timestamp dei frame
+            timestamps = []
+
+            while cap.isOpened():
+                ret, frame = cap.read()
+                if not ret:
+                    break
+
+                # Estrai il timestamp del frame corrente in millisecondi
+                timestamp = cap.get(cv2.CAP_PROP_POS_MSEC)
+                timestamps.append(timestamp)
+
+            # Chiude il video
+            cap.release()
+            # Calcola delta_t tra i frame consecutivi (in ms)
+            delta_t = np.diff(timestamps)
+
+            # Filtra i valori nulli e quelli fuori dall'intervallo [16.63 ms, 16.72 ms]
+            valid_delta_t = delta_t[(delta_t != 0) & (delta_t >= 16.63) & (delta_t <= 16.72)]
+
+            # Conta e stampa il numero di valori esclusi (nulli o fuori dall'intervallo)
+            excluded_count = len(delta_t) - len(valid_delta_t)
+            print(
+                f"Video: {file_name}, Numero di valori esclusi in delta_t (nulli o fuori intervallo): {excluded_count}")
+
+            # Calcola deviazione standard di delta_t (in ms)
+            std_delta_t = np.std(valid_delta_t)
+
+            # Propaga l'incertezza su 1 secondo (60 frame)
+            std_delta_t_1s = np.sqrt(60) * std_delta_t
+
+            # Salva i risultati nel dizionario
+            results[file_name] = {'std_delta_t_1s_ms': std_delta_t_1s, 'excluded_count': excluded_count}
+
+            # Stampa i risultati per il controllo
+            print(f"Video: {file_name}, Incertezza sul tempo per 1 secondo: {std_delta_t_1s:.12f} ms")
+
+            # Plot dei valori di delta_t con scatter
+            plt.figure(figsize=(10, 6))
+            indices = np.arange(len(delta_t))
+            plt.scatter(indices, delta_t, color='blue', label='delta_t (tutti in ms)')
+            plt.scatter(indices[(delta_t == 0) | (delta_t < 16.63) | (delta_t > 16.72)],
+                        delta_t[(delta_t == 0) | (delta_t < 16.63) | (delta_t > 16.72)],
+                        color='red', label='Valori esclusi')
+            plt.xlabel("Indice del Frame")
+            plt.ylabel("Delta t (ms)")
+            plt.title(f"Distribuzione dei delta_t per il video: {file_name}")
+            plt.legend()
+            plt.grid(True)
+            plt.show()
+
+        return results
+
+
 
 def plot_all_simulated_values(modelled_df):
     """
@@ -73,51 +148,56 @@ def plot_all_simulated_values(modelled_df):
         # Stampa il valore di sigma_0
         print(f'Sigma_0 per la velocità {velocity_key}: {sigma_0:.4f}')
 
-def analyze_clusters_sigma_vs_px_velocity(modelled_df):
+
+def analyze_clusters_sigma_vs_px_velocity(modelled_df, vpx_bin_width=10):
     """
     Per ogni DataFrame che contiene i valori di K e sigma_0, calcola i residui rispetto
-    al modello z = K / v_px per ogni punto simulato. Fa la media dei residui per ogni colonna
-    (ossia per ogni simulazione), e plotta un grafico con v_px medio sull'asse x e residuo
-    medio sull'asse y.
+    al modello z = K / v_px per ogni punto simulato. Divide i dati di v_px in intervalli di ampiezza fissa
+    (es. 10 unità), calcola la media dei residui per ogni intervallo, e plotta il grafico.
 
     Parametri:
-    - modelled_df: dizionario con DataFrame per ogni velocità, contenente i valori di v_px, z_sim,
-                   K e sigma_0.
+    - modelled_df: dizionario con DataFrame per ogni velocità, contenente i valori di v_px, z_sim, K e sigma_0.
+    - vpx_bin_width: ampiezza dell'intervallo per raggruppare i valori di v_px.
 
     Ritorna:
     - Nessun valore di ritorno, ma plotta un grafico per ogni velocità.
     """
 
     for velocity_key, df in modelled_df.items():
-        # Numero di punti simulati (assumiamo 20)
+        # Numero di punti simulati (viene calcolato dinamicamente)
         num_points = sum('vx_' in col for col in df.columns)
 
-        # Liste per salvare i residui medi e v_px medi
+        # Unisci tutti i valori di v_px e z_sim per tutte le simulazioni in un'unica lista
+        all_v_px = np.concatenate([df[f'vx_{i}'].values for i in range(1, num_points + 1)])
+        all_z_sim = np.concatenate([df[f'z_{i}'].values for i in range(1, num_points + 1)])
+
+        # Ripeti i valori di K per il numero di punti per ottenere una lista della stessa lunghezza di all_v_px
+        K_values = np.repeat(df['K'].values, num_points)
+
+        # Calcola i residui assoluti per ciascun valore di z e v_px
+        residuals = np.abs(all_z_sim - (K_values / all_v_px))
+
+        # Bin dei valori di v_px
+        vpx_min, vpx_max = all_v_px.min(), all_v_px.max()
+        bins = np.arange(vpx_min, vpx_max + vpx_bin_width, vpx_bin_width)
+
+        # Calcola il residuo medio per ciascun intervallo di v_px
         mean_residuals = []
         mean_v_px = []
 
-        # Itera su ogni coppia di colonne v_px e z_sim (ciascun punto simulato)
-        for i in range(1, num_points + 1):
-            v_px_sim = df[f'vx_{i}'].values  # Colonna dei valori v_px_i
-            z_sim = df[f'z_{i}'].values  # Colonna dei valori z_sim_i
-            K_values = df['K'].values  # Colonna dei valori K (uno per ogni riga)
-
-            # Calcola i residui: |z_sim - K / v_px_sim| per ogni simulazione (riga)
-            residuals = np.abs(z_sim - (K_values / v_px_sim))
-
-            # Calcola la media di tutti i v_px_i per questa colonna
-            mean_v = np.mean(v_px_sim)
-
-            # Salva il residuo medio (lo faremo alla fine dopo tutte le simulazioni)
-            mean_residual = np.mean(residuals)  # Media di tutti i residui per questo punto simulato
-            mean_residuals.append(mean_residual)
-            mean_v_px.append(mean_v)
+        for i in range(len(bins) - 1):
+            # Intervallo corrente
+            bin_mask = (all_v_px >= bins[i]) & (all_v_px < bins[i + 1])
+            if np.any(bin_mask):  # Se ci sono valori nell'intervallo
+                # Media di v_px e residuo per i punti che cadono in questo intervallo
+                mean_residuals.append(np.mean(residuals[bin_mask]))
+                mean_v_px.append(np.mean(all_v_px[bin_mask]))
 
         # Plot del grafico per la velocità corrente
         plt.figure(figsize=(8, 6))
         plt.scatter(mean_v_px, mean_residuals, marker='o', color='b', label='Errore medio')
-        plt.title(f'Residui associati al punto medi vs $v_{{px}}$ per la velocità: {velocity_key}')
-        plt.xlabel('$v_{{px}}$ medio')
+        plt.title(f'Residui medi vs $v_{{px}}$ per la velocità: {velocity_key}')
+        plt.xlabel('$v_{{px}}$ medio (binned)')
         plt.ylabel('Residuo medio')
         plt.grid(True)
         plt.legend()
@@ -125,30 +205,28 @@ def analyze_clusters_sigma_vs_px_velocity(modelled_df):
 
 
 
-
-
 def plot_sigma_histograms(updated_dfs):
     """
     Per ogni DataFrame nel dizionario 'updated_dfs', genera un istogramma di sigma_0
-    e calcola il valore medio di sigma_0. Mostra 5 istogrammi e calcola 5 medie.
+    e calcola il valore RMS di sigma_0. Mostra 5 istogrammi e calcola 5 valori RMS.
 
     Parametri:
     - updated_dfs: dizionario con DataFrame per ogni velocità, contenente i valori di K e sigma_0
 
     Ritorna:
-    - Un dizionario con il valore medio di sigma_0 per ogni velocità.
+    - Un dizionario con il valore RMS di sigma_0 per ogni velocità.
     """
 
-    sigma_means = {}  # Dizionario per salvare i valori medi di sigma_0 per ogni velocità
+    sigma_rms_values = {}  # Dizionario per salvare i valori RMS di sigma_0 per ogni velocità
 
     # Itera su ogni DataFrame nel dizionario delle velocità
     for velocity_key, velocity_df in updated_dfs.items():
         # Estrai i valori di sigma_0 dal DataFrame
         sigma_0_values = velocity_df['sigma_0'].values
 
-        # Calcola il valore medio di sigma_0 per questa velocità
-        sigma_mean = np.mean(sigma_0_values)
-        sigma_means[velocity_key] = sigma_mean  # Salva la media per questa velocità
+        # Calcola il valore RMS di sigma_0 per questa velocità
+        sigma_rms = np.sqrt(np.mean(sigma_0_values**2))
+        sigma_rms_values[velocity_key] = sigma_rms  # Salva il valore RMS per questa velocità
 
         # Plot dell'istogramma di sigma_0
         plt.figure(figsize=(8, 6))
@@ -159,10 +237,10 @@ def plot_sigma_histograms(updated_dfs):
         plt.grid(True)
         plt.show()
 
-        # Stampa la media di sigma_0
-        print(f'Valore medio di $\\sigma_0$ per la velocità {velocity_key}: {sigma_mean:.4f} [m]')
+        # Stampa il valore RMS di sigma_0
+        print(f'Valore RMS di $\\sigma_0$ per la velocità {velocity_key}: {sigma_rms:.4f} [m]')
 
-    return sigma_means
+    return sigma_rms_values
 
 
 def hyperbolic_model(vx, K):
@@ -172,20 +250,19 @@ def calculate_sigma(residuals, m, n):
     """Calculates standard deviation of residuals (sigma_0)."""
     return np.sqrt(np.sum(residuals**2) / (m - n))
 
-
 def estimate_k_and_sigma0(velocity_simulations_dfs):
     """
-     Per ogni DataFrame nelle simulazioni delle velocità, fitta il modello z = K * vx
-     per ogni riga, calcola K, calcola i residui, e aggiungi il valore di K e sigma_0
-     in due nuove colonne per ogni DataFrame.
+    Per ogni DataFrame nelle simulazioni delle velocità, fitta il modello z = K / vx.
+    Per ogni riga, calcola K, calcola i residui, e aggiungi il valore di K e sigma_0
+    in due nuove colonne per ogni DataFrame.
 
-     Parametri:
-     - velocity_simulations_dfs: dizionario con DataFrame per ogni velocità
+    Parametri:
+    - velocity_simulations_dfs: dizionario con DataFrame per ogni velocità
 
-     Ritorna:
-     - Un dizionario con DataFrame aggiornati, dove ogni DataFrame ha 2 nuove colonne:
+    Ritorna:
+    - Un dizionario con DataFrame aggiornati, dove ogni DataFrame ha 2 nuove colonne:
        'K' e 'sigma_0'
-     """
+    """
 
     # Dizionario per salvare i DataFrame aggiornati
     updated_dfs = {}
@@ -196,16 +273,18 @@ def estimate_k_and_sigma0(velocity_simulations_dfs):
         k_values = []
         sigma_0_values = []
 
+        # Numero di punti, metà per vx e metà per z
+        num_points = len([col for col in velocity_df.columns if col.startswith("vx_")])
+
         # Itera su ogni riga del DataFrame (ogni riga è una simulazione)
         for index, row in velocity_df.iterrows():
-            # Estrai i 20 valori di vx e i 20 valori di z da questa riga
-            vx_sim = row[[f'vx_{i + 1}' for i in range(20)]].values
-            z_sim = row[[f'z_{i + 1}' for i in range(20)]].values
+            # Estrai tutti i valori di vx e z
+            vx_sim = row[[f'vx_{i + 1}' for i in range(num_points)]].values
+            z_sim = row[[f'z_{i + 1}' for i in range(num_points)]].values
 
-            # Fitta il modello z = K * vx usando curve_fit
+            # Fitta il modello z = K / vx usando curve_fit
             popt, _ = curve_fit(hyperbolic_model, vx_sim, z_sim)
             K_estimated = popt[0]  # Il valore stimato di K
-
 
             # Calcola i residui (differenza tra z_sim e il modello predetto)
             z_model = hyperbolic_model(vx_sim, K_estimated)
@@ -218,10 +297,8 @@ def estimate_k_and_sigma0(velocity_simulations_dfs):
             k_values.append(K_estimated)
             sigma_0_values.append(sigma_0)
 
-            DRAW_CURE_FIT = 0
-            if DRAW_CURE_FIT:
-
-
+            DRAW_CURVE_FIT = 0
+            if DRAW_CURVE_FIT:
                 # Genera 50 valori di vx tra il minimo e il massimo dei valori reali
                 vx_fitted = np.linspace(vx_sim.min(), vx_sim.max(), 50)
                 z_fitted = hyperbolic_model(vx_fitted, K_estimated)  # Calcola i valori z teorici
@@ -243,149 +320,144 @@ def estimate_k_and_sigma0(velocity_simulations_dfs):
 
         # Salva il DataFrame aggiornato nel dizionario
         updated_dfs[velocity_key] = velocity_df
-        #print(velocity_df)
 
     return updated_dfs
 
-
-def generate_montecarlo_new_data_and_analyze(result_dict, num_simulations=100000):
+def generate_montecarlo_simulations(file_path, num_simulations=100, z_std_dev=0.05, vpx_std_dev=1.0, plot=False):
     """
-    Esegue simulazioni Monte Carlo per ogni velocità. Per ogni velocità genera 20 punti usando
-    le rispettive medie (mu) e deviazioni standard (sigma) per z_mean e vx, moltiplica tutte le vx per 60,
-    quindi restituisce un dizionario con un DataFrame per ogni velocità.
+    Esegue simulazioni Monte Carlo per ciascuna velocità 3D (v_3d) in un file di input.
+    Per ogni velocità, simula un numero di punti pari al numero di punti presenti nel dataset originale,
+    usando i valori del dataset come media e valori di deviazione standard definiti. Può opzionalmente
+    plottare ogni simulazione.
 
     Parametri:
-    - result_dict: dizionario contenente mu e sigma per ogni cluster (marker, prova, velocità)
-    - num_simulations: numero di simulazioni Monte Carlo da eseguire per ogni cluster
+    - file_path: percorso del file Excel con i dati originali.
+    - num_simulations: numero di simulazioni Monte Carlo da eseguire per ciascuna velocità 3D.
+    - z_std_dev: deviazione standard per z_mean da utilizzare nelle simulazioni.
+    - vpx_std_dev: deviazione standard per v_px da utilizzare nelle simulazioni.
+    - plot: flag per attivare/disattivare il plot di ogni simulazione.
 
     Ritorna:
-    - Un dizionario con una chiave per ogni velocità e un DataFrame per ogni velocità, contenente 40 colonne
-      (20 vx_sim e 20 z_sim) e una riga per ogni simulazione.
+    - Un dizionario con una chiave per ogni velocità (v_3d) e un DataFrame contenente i risultati delle simulazioni.
     """
 
-    # Trova tutte le velocità uniche nel dizionario
-    velocities = set([float(key.split('_')[3]) for key in result_dict.keys()])
+    # Carica i dati dal file Excel
+    df = pd.read_excel(file_path)
 
-    # Dizionario per salvare un DataFrame per ogni velocità
+    # Identifica le velocità uniche in vx_3D
+    velocities = df['vx_3D'].unique()
+
+    # Dizionario per salvare un DataFrame di simulazioni per ogni velocità
     velocity_simulations_dfs = {}
 
-    # Itera su ogni velocità
+    # Itera su ciascuna velocità 3D
     for velocity in velocities:
-        # Filtra i cluster per la velocità target
-        filtered_clusters = {key: val for key, val in result_dict.items() if f'vx3D_{velocity}' in key}
+        # Filtra i dati per la velocità corrente
+        velocity_df = df[df['vx_3D'] == velocity]
 
-        # Lista per salvare tutte le simulazioni per la velocità corrente (che diventerà un DataFrame)
+        # Lista per memorizzare tutte le simulazioni per la velocità corrente
         all_simulations = []
 
-        # Esegui num_simulations simulazioni Monte Carlo
+        # Esegui le simulazioni Monte Carlo
         for sim_num in range(num_simulations):
-            # Liste per salvare i dati simulati per la velocità corrente
-            vx_simulated = []
-            z_simulated = []
+            if sim_num % 50 == 0:
+                print(sim_num, end="")
+            # Genera valori simulati per ciascun punto del dataset
+            vx_simulated = np.abs(np.random.normal(velocity_df['vx'].values * 60, vpx_std_dev))
+            z_simulated = np.random.normal(velocity_df['z_mean'].values, z_std_dev)
 
-            # Itera su ogni cluster (ci sono 20 per ogni velocità)
-            for key, stats in filtered_clusters.items():
-                # Estrai mu e sigma per z_mean e vx, e moltiplica vx_mu per 60
-                z_mean_mu = stats['z_mean_mu']
-                z_mean_sigma = stats['z_mean_sigma']
-                vx_mu = stats['vx_mu']  # Moltiplica vx_mu per 60
-                vx_sigma = stats['vx_sigma']
-
-                # Genera un singolo valore simulato per vx e z_mean
-                vx_sim = np.random.normal(vx_mu, vx_sigma)
-                z_sim = np.random.normal(z_mean_mu, z_mean_sigma)
-
-                # Aggiungi i valori simulati alle rispettive liste
-                vx_simulated.append(vx_sim)
-                z_simulated.append(z_sim)
-
-            DRAW = 0
-            if DRAW:
-                # Plot dei 20 punti simulati
-                plt.figure(figsize=(8, 6))
-                plt.scatter(vx_simulated, z_simulated, alpha=0.7)
-                plt.title(f'Simulazione Monte Carlo #{sim_num + 1} per velocità {velocity}')
-                plt.xlabel('vx simulato')
-                plt.ylabel('z_mean simulato')
-                plt.grid(True)
-                plt.show()
-
-            # Crea una riga di risultati concatenando vx_sim e z_sim in un'unica lista
+            # Crea una riga di simulazione concatenando i valori simulati di vx e z
             simulation_row = np.concatenate([vx_simulated, z_simulated])
-
-            # Aggiungi la riga alla lista di tutte le simulazioni per questa velocità
             all_simulations.append(simulation_row)
 
-        # Definisci i nomi delle colonne: vx_1, vx_2, ..., vx_20, z_1, z_2, ..., z_20
-        column_names = [f'vx_{i + 1}' for i in range(20)] + [f'z_{i + 1}' for i in range(20)]
+            # Plot della simulazione corrente, se richiesto
+            if plot:
+                plt.figure(figsize=(8, 6))
+                plt.scatter(vx_simulated, z_simulated, color='blue', alpha=0.6, label='Simulazione Monte Carlo')
+                plt.xlabel('v_px (simulato) [px/s]')
+                plt.ylabel('z (simulato)')
+                plt.title(f'Simulazione Monte Carlo #{sim_num + 1} per velocità {velocity}')
+                plt.grid(True)
+                plt.legend()
+                plt.show()
+        print("simulation terminated")
 
-        # Trasforma le simulazioni in un DataFrame per questa velocità
-        velocity_df = pd.DataFrame(all_simulations, columns=column_names)
+        # Nomi delle colonne per i risultati (es. vx_1, vx_2, ..., z_1, z_2, ...)
+        column_names = [f'vx_{i + 1}' for i in range(len(velocity_df))] + [f'z_{i + 1}' for i in range(len(velocity_df))]
 
-        # Salva il DataFrame per questa velocità nel dizionario
-        velocity_simulations_dfs[f'velocity_{velocity}'] = velocity_df
-
-
-        #print(velocity_simulations_dfs)
+        # Trasforma i risultati delle simulazioni in un DataFrame
+        simulations_df = pd.DataFrame(all_simulations, columns=column_names)
+        # Salva il DataFrame nel dizionario con la velocità come chiave
+        velocity_simulations_dfs[f'velocity_{velocity}'] = simulations_df
 
     return velocity_simulations_dfs
 
-
-
-def extract_mu_and_sigma_from_marker(file_path, apply_moving_average=True):
+def extract_mu_and_sigma_from_marker(file_path, std_px=1, z_std_dev_literature=0.05, apply_moving_average=True):
     """
-    Estrae media e deviazione standard per 'z_mean' e 'v_px' da un file Excel.
-    Se 'apply_moving_average' è True, applica una media mobile a 3 elementi solo su 'v_px'.
+    Calcola l'incertezza propagata su 'v_px' da un file Excel.
+    Usa propagazione dell'incertezza su v_px basata su std_px e std_t (deviazione std del delta_t tra frame).
 
     Parametri:
-    - file_path: il percorso del file Excel
-    - apply_moving_average: flag per attivare/disattivare la media mobile su 'v_px'
+    - file_path: percorso del file Excel
+    - std_px: deviazione standard sullo spostamento in pixel (default=1)
+    - z_std_dev_literature: deviazione standard per z_mean dalla letteratura
+    - apply_moving_average: flag per attivare/disattivare la media mobile a 3 elementi su 'v_px'
 
     Ritorna:
-    - Un dizionario con le medie e le deviazioni standard per ogni cluster.
+    - Un dizionario con solo la deviazione standard propagata per v_px e z_mean per ogni velocità.
     """
+    video_path  ="/home/mmt-ben/DepthFromOpticalFlow/video_raw"
+    dt_results = calculate_video_dt_std(video_path)
+    print(dt_results)
 
     # Legge il file Excel
     df = pd.read_excel(file_path)
+    print(df)
 
     # Trasforma la colonna 'vx' in valore assoluto e moltiplica per 60
     df['vx'] = df['vx'].abs() * 60
+
+    # Calcola la differenza di tempo tra i frame consecutivi
+    df['delta_t'] = df['time'].diff().fillna(0)  # Differenza di tempo tra i frame
+    std_t = df['delta_t'].std()  # Deviazione standard di delta_t
 
     # Applica la media mobile a 3 elementi su 'vx' se la flag è attivata
     if apply_moving_average:
         df['vx'] = df['vx'].rolling(window=3, min_periods=1).mean()
 
-    # Raggruppa i dati per 'marker', 'vx_3D', 'prova'
-    grouped = df.groupby(['marker', 'vx_3D', 'prova'])
+    # Raggruppa i dati solo per 'vx_3D'
+    grouped = df.groupby(['vx_3D'])
 
-    # Crea un dizionario per salvare i risultati
+    # Dizionario per salvare solo la deviazione standard propagata
     results = {}
 
-    # Itera su ogni gruppo e calcola media e deviazione standard per z_mean e vx
-    for name, group in grouped:
-        marker = name[0]
-        vx_3D = name[1]
-        prova = name[2]
+    # Calcolo della propagazione dell'incertezza su v_px per ciascun gruppo vx_3D
+    for vx_3D, group in grouped:
+        # Calcola la deviazione standard propagata su v_px
+        delta_px_mean = group['pixel_displacement'].mean()  # Spostamento medio in pixel
+        delta_t_mean = group['delta_t'].mean()  # Tempo medio tra frame
 
-        # Calcola la media e la deviazione standard per z_mean e vx
-        z_mean_mu = group['z_mean'].mean()
-        z_mean_sigma = group['z_mean'].std()
+        std_vpx = (std_px / delta_px_mean) * np.sqrt((std_px / delta_px_mean)**2 + (std_t / delta_t_mean)**2)
 
-        vx_mu = group['vx'].mean()
-        vx_sigma = group['vx'].std()
-
-        # Crea una chiave unica per ogni cluster
-        key = f'marker_{marker}_vx3D_{vx_3D}_prova_{prova}'
-
-        # Salva i risultati in un dizionario
-        results[key] = {
-            'z_mean_mu': z_mean_mu,
-            'z_mean_sigma': z_mean_sigma,
-            'vx_mu': vx_mu,
-            'vx_sigma': vx_sigma
+        # Salva solo i risultati di std_vpx e z_std_dev_literature per vx_3D
+        results[vx_3D] = {
+            'std_vpx': std_vpx,
+            'z_std_dev_literature': z_std_dev_literature
         }
 
+        # Stampa i risultati per controllo
+        print(f"Velocità {vx_3D}: std_vpx = {std_vpx:.4f}, z_std_dev_literature = {z_std_dev_literature}")
+
+
+    print(results)
+    sys.exit()
     return results
+
+
+
+
+# Esempio di utilizzo:
+# result_dict = extract_mu_and_sigma_from_marker('path_to_file.xlsx', apply_moving_average=True, frame_time_std=0.01)
 
 
 def bland_altman_plot(x, y, k, save_path, file_name="bland_altman_plot.png"):
@@ -2417,25 +2489,24 @@ EXPERIMENTAL_MODEL_METROLOGICAL_ASSESTMENT = 1
 
 if EXPERIMENTAL_MODEL_METROLOGICAL_ASSESTMENT:
 
+
     file_path_1 = 'dati_of/all_points_big_fix_speed.xlsx'
 
 
-    mu_sigma_dict_results = extract_mu_and_sigma_from_marker(file_path_1)
 
-    montecarlo_results = generate_montecarlo_new_data_and_analyze(mu_sigma_dict_results)
+    montecarlo_results = generate_montecarlo_simulations(file_path_1, z_std_dev=0.0005, vpx_std_dev=1.0)
 
 
     modelled_df = estimate_k_and_sigma0(montecarlo_results)
 
+
+
     sigmas = plot_sigma_histograms(modelled_df)
+
 
     analyze_clusters_sigma_vs_px_velocity(modelled_df)
 
     plot_all_simulated_values(modelled_df)
-
-
-
-
 
 
 # Flag for performing experimental model fitting and graph generation
