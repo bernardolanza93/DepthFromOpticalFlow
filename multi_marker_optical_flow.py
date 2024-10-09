@@ -13,6 +13,62 @@ SHOW_STAIRCASE_ROBOT = 0
 SHOW_FILTRATION_SIGNAL_OF = 0
 
 
+def analyze_std_dev_of_zModel_by_vx(modelled_df, vpx_bin_width=20):
+    """
+    Calcola la deviazione standard di z previsto dal modello z = K / v_px per ogni intervallo di velocità v_px.
+    Esegue il calcolo per tutte le simulazioni e per tutti i punti che cadono in un intervallo di velocità.
+
+    Parametri:
+    - modelled_df: dizionario con DataFrame per ogni velocità, contenente i valori di v_px, z_sim, K e sigma_0.
+    - vpx_bin_width: ampiezza dell'intervallo per raggruppare i valori di v_px.
+
+    Ritorna:
+    - Nessun valore di ritorno, ma plotta un grafico della deviazione standard per ogni intervallo di v_px.
+    """
+
+    for velocity_key, df in modelled_df.items():
+        # Numero di punti simulati
+        num_points = sum('vx_' in col for col in df.columns)
+
+        # Estrazione di tutti i valori di v_px e K come array
+        v_px_values = np.hstack([df[f'vx_{i}'].values.reshape(-1, 1) for i in range(1, num_points + 1)])
+        K_values = df['K'].values.reshape(-1, 1)  # Reshape per broadcast su colonne
+
+        # Calcolo di z_model per ogni colonna di v_px e per ogni simulazione
+        z_model = K_values / v_px_values
+
+        # Flatten dei valori di v_px e z_model
+        all_v_px_flat = v_px_values.flatten()
+        all_z_model_flat = z_model.flatten()
+
+        # Definisci i bin per i valori di v_px
+        vpx_min, vpx_max = all_v_px_flat.min(), all_v_px_flat.max()
+        bins = np.arange(vpx_min, vpx_max + vpx_bin_width, vpx_bin_width)
+
+        # Liste per memorizzare la deviazione standard di z e il valore medio di v_px per ogni intervallo
+        std_devs = []
+        mean_v_px = []
+
+        # Calcolo della deviazione standard per ciascun intervallo di v_px
+        for i in range(len(bins) - 1):
+            # Maschera per selezionare i valori che rientrano nell'intervallo
+            bin_mask = (all_v_px_flat >= bins[i]) & (all_v_px_flat < bins[i + 1])
+            if np.any(bin_mask):  # Se ci sono valori in questo intervallo
+                # Calcola la deviazione standard dei valori di z_model nell'intervallo
+                std_devs.append(np.std(all_z_model_flat[bin_mask]))
+                # Calcola il valore medio di v_px nell'intervallo
+                mean_v_px.append((bins[i] + bins[i + 1]) / 2)
+
+        # Plot della deviazione standard per ciascun intervallo di v_px
+        plt.figure(figsize=(8, 6))
+        plt.scatter(mean_v_px, std_devs, marker='o', color='purple', label='Deviazione standard di z')
+        plt.title(f'Deviazione standard di z per intervalli di $v_{{px}}$ - Velocità: {velocity_key}')
+        plt.xlabel('$v_{{px}}$ medio (binned)')
+        plt.ylabel('Deviazione standard di z')
+        plt.grid(True)
+        plt.legend()
+        plt.show()
+
 def calculate_video_dt_std(folder_path):
     """
     Calcola la media e la deviazione standard dei tempi di frame (delta_t) per ciascun video in una directory.
@@ -323,7 +379,7 @@ def estimate_k_and_sigma0(velocity_simulations_dfs):
 
     return updated_dfs
 
-def generate_montecarlo_simulations(file_path, num_simulations=100, z_std_dev=0.05, vpx_std_dev=1.0, plot=False):
+def generate_montecarlo_simulations(file_path, num_simulations=100, z_std_dev=0.05, vpx_std_dev=10.0, plot=False):
     """
     Esegue simulazioni Monte Carlo per ciascuna velocità 3D (v_3d) in un file di input.
     Per ogni velocità, simula un numero di punti pari al numero di punti presenti nel dataset originale,
@@ -2494,7 +2550,7 @@ if EXPERIMENTAL_MODEL_METROLOGICAL_ASSESTMENT:
 
 
 
-    montecarlo_results = generate_montecarlo_simulations(file_path_1, z_std_dev=0.0005, vpx_std_dev=1.0)
+    montecarlo_results = generate_montecarlo_simulations(file_path_1, z_std_dev=0.005, vpx_std_dev=1.0)
 
 
     modelled_df = estimate_k_and_sigma0(montecarlo_results)
@@ -2505,6 +2561,7 @@ if EXPERIMENTAL_MODEL_METROLOGICAL_ASSESTMENT:
 
 
     analyze_clusters_sigma_vs_px_velocity(modelled_df)
+    analyze_std_dev_of_zModel_by_vx(modelled_df)
 
     plot_all_simulated_values(modelled_df)
 
