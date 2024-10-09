@@ -2545,6 +2545,10 @@ EXPERIMENTAL_MODEL_METROLOGICAL_ASSESTMENT = 1
 
 if EXPERIMENTAL_MODEL_METROLOGICAL_ASSESTMENT:
 
+    #incertezza pixel = 1px (al frame)
+    #incertezza dt = 0,00013 s (1 frame)
+    #incertezza vpx = 60px/s
+
 
     file_path_1 = 'dati_of/all_points_big_fix_speed.xlsx'
 
