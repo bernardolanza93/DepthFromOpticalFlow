@@ -13,7 +13,76 @@ SHOW_STAIRCASE_ROBOT = 0
 SHOW_FILTRATION_SIGNAL_OF = 0
 
 
-def analyze_std_dev_of_zModel_by_vx(modelled_df, vpx_bin_width=20):
+def combined_analysis_sigma_vs_vx(modelled_df, vpx_bin_width=30):
+    """
+    Combina l'analisi dei residui medi (rispetto al modello z = K / v_px) e della deviazione standard di z.
+    La funzione calcola e plotta la somma dei residui medi e della deviazione standard per ciascun intervallo di v_px.
+
+    Parametri:
+    - modelled_df: dizionario con DataFrame per ogni velocità, contenente i valori di v_px, z_sim, K e sigma_0.
+    - vpx_bin_width: ampiezza dell'intervallo per raggruppare i valori di v_px.
+
+    Ritorna:
+    - Nessun valore di ritorno, ma plotta un grafico combinato per ogni velocità.
+    """
+
+    for velocity_key, df in modelled_df.items():
+        # Numero di punti simulati (viene calcolato dinamicamente)
+        num_points = sum('vx_' in col for col in df.columns)
+
+        # Unisci tutti i valori di v_px e z_sim per tutte le simulazioni in un'unica lista
+        all_v_px = np.concatenate([df[f'vx_{i}'].values for i in range(1, num_points + 1)])
+        all_z_sim = np.concatenate([df[f'z_{i}'].values for i in range(1, num_points + 1)])
+
+        # Ripeti i valori di K per il numero di punti per ottenere una lista della stessa lunghezza di all_v_px
+        K_values = np.repeat(df['K'].values, num_points)
+
+        # Calcola i residui assoluti per ciascun valore di z e v_px (F1)
+        residuals = np.abs(all_z_sim - (K_values / all_v_px))
+
+        # Definisci i bin per i valori di v_px
+        vpx_min, vpx_max = all_v_px.min(), all_v_px.max()
+        bins = np.arange(vpx_min, vpx_max + vpx_bin_width, vpx_bin_width)
+
+        # Liste per memorizzare il residuo medio, deviazione standard, e il valore medio di v_px per ogni intervallo
+        mean_residuals = []
+        std_devs = []
+        mean_v_px = []
+
+        # Calcolo di residuo medio e deviazione standard per ciascun intervallo di v_px
+        for i in range(len(bins) - 1):
+            # Maschera per selezionare i valori che rientrano nell'intervallo
+            bin_mask = (all_v_px >= bins[i]) & (all_v_px < bins[i + 1])
+            if np.any(bin_mask):  # Se ci sono valori in questo intervallo
+                # Calcola la media dei residui per i punti nell'intervallo (F1)
+                mean_residuals.append(np.mean(residuals[bin_mask]))
+
+                # Calcola la deviazione standard dei valori di z_model nell'intervallo (F2)
+                z_model = K_values[bin_mask] / all_v_px[bin_mask]
+                std_devs.append(np.std(z_model))
+
+                # Calcola il valore medio di v_px nell'intervallo
+                mean_v_px.append((bins[i] + bins[i + 1]) / 2)
+
+        # Somma di F1 e F2
+        combined_values = [mean_residuals[i] + std_devs[i] for i in range(len(mean_residuals))]
+
+        # Plot del grafico combinato per la velocità corrente
+        plt.figure(figsize=(8, 6))
+        plt.scatter(mean_v_px, combined_values, marker='o', color='g', label='Residuo medio + Deviazione standard')
+        plt.title(
+            f'Analisi combinata: Residuo medio + Deviazione standard vs $v_{{px}}$ per la velocità: {velocity_key}')
+        plt.xlabel('$v_{{px}}$ medio (binned)')
+        plt.ylabel('Residuo medio + Deviazione standard')
+        plt.grid(True)
+        plt.legend()
+        plt.show()
+
+
+# Esempio di utilizzo:
+# combined_analysis_sigma_vs_vx(modelled_df, vpx_bin_width=10)
+
+def analyze_std_dev_of_zModel_by_vx(modelled_df, vpx_bin_width=30):
     """
     Calcola la deviazione standard di z previsto dal modello z = K / v_px per ogni intervallo di velocità v_px.
     Esegue il calcolo per tutte le simulazioni e per tutti i punti che cadono in un intervallo di velocità.
@@ -62,7 +131,7 @@ def analyze_std_dev_of_zModel_by_vx(modelled_df, vpx_bin_width=20):
         # Plot della deviazione standard per ciascun intervallo di v_px
         plt.figure(figsize=(8, 6))
         plt.scatter(mean_v_px, std_devs, marker='o', color='purple', label='Deviazione standard di z')
-        plt.title(f'Deviazione standard di z per intervalli di $v_{{px}}$ - Velocità: {velocity_key}')
+        plt.title(f'STD-DEV of DEPTH (z_model) , ALL Model. VS.  $v_{{px}}$ - range di velocità: {velocity_key}')
         plt.xlabel('$v_{{px}}$ medio (binned)')
         plt.ylabel('Deviazione standard di z')
         plt.grid(True)
@@ -252,7 +321,7 @@ def analyze_clusters_sigma_vs_px_velocity(modelled_df, vpx_bin_width=10):
         # Plot del grafico per la velocità corrente
         plt.figure(figsize=(8, 6))
         plt.scatter(mean_v_px, mean_residuals, marker='o', color='b', label='Errore medio')
-        plt.title(f'Residui medi vs $v_{{px}}$ per la velocità: {velocity_key}')
+        plt.title(f'Residui medi (GT wrt Modello) vs $v_{{px}}$ per la velocità: {velocity_key}')
         plt.xlabel('$v_{{px}}$ medio (binned)')
         plt.ylabel('Residuo medio')
         plt.grid(True)
@@ -2566,6 +2635,7 @@ if EXPERIMENTAL_MODEL_METROLOGICAL_ASSESTMENT:
 
     analyze_clusters_sigma_vs_px_velocity(modelled_df)
     analyze_std_dev_of_zModel_by_vx(modelled_df)
+    combined_analysis_sigma_vs_vx(modelled_df)
 
     plot_all_simulated_values(modelled_df)
 
