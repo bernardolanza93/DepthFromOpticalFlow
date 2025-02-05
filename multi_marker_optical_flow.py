@@ -6,24 +6,121 @@ from multi_marker_source_function import *
 from sklearn.linear_model import LinearRegression
 import scipy.signal as signal
 from sklearn.cluster import KMeans
+import scipy.stats as stats
+
 
 DISCARD_HIGH_SPEED  = 0
 MAX_SPEED=0.70
 SHOW_STAIRCASE_ROBOT = 0
 SHOW_FILTRATION_SIGNAL_OF = 0
 
+fig_size = (8,6)
+adjusto = 0.15
+label_size_axes = 13
 
-def combined_analysis_sigma_vs_vx(modelled_df, vpx_bin_width=30):
+# Directory where graphs are saved
+save_directory = "graphs"
+
+# Ensure the directory exists
+os.makedirs(save_directory, exist_ok=True)
+
+
+#Modifiche: RMS dei residui non media
+#poi faccio RADQ(rms^2 piu dev std ^2)
+
+
+
+def combined_analysis_all_velocities(modelled_df, vpx_bin_width=30):
     """
-    Combina l'analisi dei residui medi (rispetto al modello z = K / v_px) e della deviazione standard di z.
-    La funzione calcola e plotta la somma dei residui medi e della deviazione standard per ciascun intervallo di v_px.
+    Combina l'analisi dei residui medi e della deviazione standard di z per tutte le velocità,
+    calcolando il valore RMS (radice della somma dei quadrati) per ciascun intervallo di v_px.
+    Genera un unico grafico che mostra i segnali combinati di tutte le velocità.
 
     Parametri:
     - modelled_df: dizionario con DataFrame per ogni velocità, contenente i valori di v_px, z_sim, K e sigma_0.
     - vpx_bin_width: ampiezza dell'intervallo per raggruppare i valori di v_px.
 
     Ritorna:
-    - Nessun valore di ritorno, ma plotta un grafico combinato per ogni velocità.
+    - Nessun valore di ritorno, ma plotta un grafico unico con i segnali combinati per tutte le velocità.
+    """
+    plt.figure(figsize=fig_size)
+    plt.grid(True)
+
+    for velocity_key, df in modelled_df.items():
+        # Numero di punti simulati (viene calcolato dinamicamente)
+        num_points = sum('vx_' in col for col in df.columns)
+
+        # Unisci tutti i valori di v_px e z_sim per tutte le simulazioni in un'unica lista
+        all_v_px = np.concatenate([df[f'vx_{i}'].values for i in range(1, num_points + 1)])
+        all_z_sim = np.concatenate([df[f'z_{i}'].values for i in range(1, num_points + 1)])
+
+        # Ripeti i valori di K per il numero di punti per ottenere una lista della stessa lunghezza di all_v_px
+        K_values = np.repeat(df['K'].values, num_points)
+
+        # Calcola i residui assoluti per ciascun valore di z e v_px (F1)
+        residuals = np.abs(all_z_sim - (K_values / all_v_px))
+
+        # Definisci i bin per i valori di v_px
+        vpx_min, vpx_max = all_v_px.min(), all_v_px.max()
+        bins = np.arange(vpx_min, vpx_max + vpx_bin_width, vpx_bin_width)
+
+        # Liste per memorizzare il residuo medio, deviazione standard, e il valore medio di v_px per ogni intervallo
+        mean_residuals = []
+        std_devs = []
+        mean_v_px = []
+
+        # Calcolo di residuo medio e deviazione standard per ciascun intervallo di v_px
+        for i in range(len(bins) - 1):
+            # Maschera per selezionare i valori che rientrano nell'intervallo
+            bin_mask = (all_v_px >= bins[i]) & (all_v_px < bins[i + 1])
+            if np.any(bin_mask):  # Se ci sono valori in questo intervallo
+                # Calcola la media dei residui per i punti nell'intervallo (F1)
+                mean_residuals.append(np.mean(residuals[bin_mask]))
+
+                # Calcola la deviazione standard dei valori di z_model nell'intervallo (F2)
+                z_model = K_values[bin_mask] / all_v_px[bin_mask]
+                std_devs.append(np.std(z_model))
+
+                # Calcola il valore medio di v_px nell'intervallo
+                mean_v_px.append((bins[i] + bins[i + 1]) / 2)
+
+        # Calcolo RMS di F1 e F2
+        combined_values = [np.sqrt(mean_residuals[i]**2 + std_devs[i]**2) for i in range(len(mean_residuals))]
+
+        # Aggiungi la curva al grafico
+        plt.scatter(mean_v_px, combined_values, marker='o', label=f'$V_{{ext}}$ = {velocity_key.split("_")[-1]} ($\\frac{{m}}{{s}}$)')
+
+    # Configurazione del graficoq
+    plt.title(f'$\\sigma_z$, $\\epsilon$ and RMS($\\sigma_z$ + $\\epsilon$), all $V_{{ext}}$', fontsize=20)
+    plt.xlabel('$v_{px}$ [$\\frac{px}{s}$]', fontsize=20)
+    plt.ylabel('[m]', fontsize=20)
+
+    plt.tick_params(axis='both', which='major', labelsize=label_size_axes)
+
+    plt.legend(fontsize=15)
+    plt.subplots_adjust(bottom=adjusto)
+    existing_files = [f for f in os.listdir(save_directory) if os.path.isfile(os.path.join(save_directory, f))]
+    next_file_number = len(existing_files) + 1
+    # Generate a file name based on the next file number
+    file_name = f"{next_file_number}.png"
+    file_path = os.path.join(save_directory, file_name)
+    plt.savefig(file_path, bbox_inches='tight')
+    plt.show()
+
+
+
+def combined_analysis_sigma_vs_vx(modelled_df, vpx_bin_width=30):
+    """
+    Combina l'analisi dei residui medi (rispetto al modello z = K / v_px) e della deviazione standard di z.
+    La funzione calcola e plotta la somma dei residui medi e della deviazione standard per ciascun intervallo di v_px.
+    Inoltre, include grafici separati per i soli residui e per la sola deviazione standard nello stesso grafico.
+
+    Parametri:
+    - modelled_df: dizionario con DataFrame per ogni velocità, contenente i valori di v_px, z_sim, K e sigma_0.
+    - vpx_bin_width: ampiezza dell'intervallo per raggruppare i valori di v_px.
+
+    Ritorna:
+    - Nessun valore di ritorno, ma plotta un grafico dettagliato per ogni velocità.
     """
 
     for velocity_key, df in modelled_df.items():
@@ -65,35 +162,45 @@ def combined_analysis_sigma_vs_vx(modelled_df, vpx_bin_width=30):
                 mean_v_px.append((bins[i] + bins[i + 1]) / 2)
 
         # Somma di F1 e F2
-        combined_values = [mean_residuals[i] + std_devs[i] for i in range(len(mean_residuals))]
-
-        # Plot del grafico combinato per la velocità corrente
-        plt.figure(figsize=(8, 6))
-        plt.scatter(mean_v_px, combined_values, marker='o', color='g', label='Residuo medio + Deviazione standard')
-        plt.title(
-            f'Analisi combinata: Residuo medio + Deviazione standard vs $v_{{px}}$ per la velocità: {velocity_key}')
-        plt.xlabel('$v_{{px}}$ medio (binned)')
-        plt.ylabel('Residuo medio + Deviazione standard')
+        combined_values = [np.sqrt(mean_residuals[i]**2 + std_devs[i]**2) for i in range(len(mean_residuals))]
+        # Plot del grafico dettagliato per la velocità corrente
+        plt.figure(figsize=fig_size)
         plt.grid(True)
-        plt.legend()
+        plt.plot(mean_v_px, combined_values, marker='o', color='g', label='RMS($\\epsilon$ + $\\sigma_z$)')
+        plt.plot(mean_v_px, mean_residuals, marker='x', color='b', linestyle='--', label='Mean Residuals $\\epsilon$')
+        plt.plot(mean_v_px, std_devs, marker='s', color='r', linestyle=':', label='$\\sigma_z$')
+        plt.title(f'$\\sigma_z$, $\\epsilon$ and RMS($\\sigma_z$ + $\\epsilon$); $V_{{ext}}$ = {velocity_key.split("_")[-1]} ($\\frac{{m}}{{s}}$)', fontsize=20)
+        plt.xlabel('$v_{px}$ [$\\frac{px}{s}$]', fontsize=20)
+        plt.ylabel('[m]', fontsize=20)
+        plt.xlim(0, 3800)
+        plt.ylim(0, 1.3)
+
+        plt.tick_params(axis='both', which='major', labelsize=label_size_axes)
+        plt.subplots_adjust(bottom=adjusto)
+
+        plt.legend(fontsize=15)
+        existing_files = [f for f in os.listdir(save_directory) if os.path.isfile(os.path.join(save_directory, f))]
+        next_file_number = len(existing_files) + 1
+        # Generate a file name based on the next file number
+        file_name = f"{next_file_number}.png"
+        file_path = os.path.join(save_directory, file_name)
+        plt.savefig(file_path, bbox_inches='tight')
         plt.show()
-
-
-# Esempio di utilizzo:
-# combined_analysis_sigma_vs_vx(modelled_df, vpx_bin_width=10)
 
 def analyze_std_dev_of_zModel_by_vx(modelled_df, vpx_bin_width=30):
     """
     Calcola la deviazione standard di z previsto dal modello z = K / v_px per ogni intervallo di velocità v_px.
-    Esegue il calcolo per tutte le simulazioni e per tutti i punti che cadono in un intervallo di velocità.
+    Combina i risultati di tutte le velocità in un singolo grafico.
 
     Parametri:
     - modelled_df: dizionario con DataFrame per ogni velocità, contenente i valori di v_px, z_sim, K e sigma_0.
     - vpx_bin_width: ampiezza dell'intervallo per raggruppare i valori di v_px.
 
     Ritorna:
-    - Nessun valore di ritorno, ma plotta un grafico della deviazione standard per ogni intervallo di v_px.
+    - Nessun valore di ritorno, ma plotta un grafico unico della deviazione standard.
     """
+    plt.figure(figsize=fig_size)
+    plt.grid(True)
 
     for velocity_key, df in modelled_df.items():
         # Numero di punti simulati
@@ -128,15 +235,26 @@ def analyze_std_dev_of_zModel_by_vx(modelled_df, vpx_bin_width=30):
                 # Calcola il valore medio di v_px nell'intervallo
                 mean_v_px.append((bins[i] + bins[i + 1]) / 2)
 
-        # Plot della deviazione standard per ciascun intervallo di v_px
-        plt.figure(figsize=(8, 6))
-        plt.scatter(mean_v_px, std_devs, marker='o', color='purple', label='Deviazione standard di z')
-        plt.title(f'STD-DEV of DEPTH (z_model) , ALL Model. VS.  $v_{{px}}$ - range di velocità: {velocity_key}')
-        plt.xlabel('$v_{{px}}$ medio (binned)')
-        plt.ylabel('Deviazione standard di z')
-        plt.grid(True)
-        plt.legend()
-        plt.show()
+        # Aggiungi al grafico
+        plt.scatter(mean_v_px, std_devs, marker='o', label=f'$V_{{ext}}$ = {velocity_key.split("_")[-1]} ($\\frac{{m}}{{s}}$)')
+
+    # Configurazione del grafico
+    plt.title('STD of $z_{{model}}$: $\\sigma_z$', fontsize=20)
+    plt.xlabel('$v_{px}$ [$\\frac{px}{s}$]', fontsize=20)
+    plt.ylabel('$\\sigma_z$ [m]', fontsize=20)
+    plt.tick_params(axis='both', which='major', labelsize=label_size_axes)
+
+    plt.legend(fontsize=15)
+    plt.subplots_adjust(bottom=adjusto)
+    existing_files = [f for f in os.listdir(save_directory) if os.path.isfile(os.path.join(save_directory, f))]
+    next_file_number = len(existing_files) + 1
+    # Generate a file name based on the next file number
+    file_name = f"{next_file_number}.png"
+    file_path = os.path.join(save_directory, file_name)
+    plt.savefig(file_path, bbox_inches='tight')
+
+    plt.show()
+
 
 def calculate_video_dt_std(folder_path):
     """
@@ -197,7 +315,8 @@ def calculate_video_dt_std(folder_path):
             print(f"Video: {file_name}, Incertezza sul tempo per 1 secondo: {std_delta_t_1s:.12f} ms")
 
             # Plot dei valori di delta_t con scatter
-            plt.figure(figsize=(10, 6))
+            plt.figure(figsize=fig_size)
+            plt.grid(True)
             indices = np.arange(len(delta_t))
             plt.scatter(indices, delta_t, color='blue', label='delta_t (tutti in ms)')
             plt.scatter(indices[(delta_t == 0) | (delta_t < 16.63) | (delta_t > 16.72)],
@@ -207,8 +326,16 @@ def calculate_video_dt_std(folder_path):
             plt.ylabel("Delta t (ms)")
             plt.title(f"Distribuzione dei delta_t per il video: {file_name}")
             plt.legend()
-            plt.grid(True)
+            plt.subplots_adjust(bottom=adjusto)
+            existing_files = [f for f in os.listdir(save_directory) if os.path.isfile(os.path.join(save_directory, f))]
+            next_file_number = len(existing_files) + 1
+            # Generate a file name based on the next file number
+            file_name = f"{next_file_number}.png"
+            file_path = os.path.join(save_directory, file_name)
+            plt.savefig(file_path, bbox_inches='tight')
+
             plt.show()
+
 
         return results
 
@@ -260,33 +387,50 @@ def plot_all_simulated_values(modelled_df):
         z_fitted = hyperbolic_model(v_px_fitted, K_estimated)  # Calcola i valori z teorici
 
         # Plot dei punti simulati (scatter) e della curva stimata (line)
-        plt.figure(figsize=(8, 6))
-        plt.scatter(all_v_px, all_z_sim, s=1, color='blue', marker="X", alpha=0.5, label='Punti simulati')
-        plt.plot(v_px_fitted, z_fitted, color='red', label=f'Curva stimata: K={K_estimated:.2f}')
-        plt.title(f'Tutti i punti simulati e il modello per la velocità: {velocity_key}')
-        plt.xlabel('$v_{px}$')
-        plt.ylabel('$z$')
-        plt.legend()
+        plt.figure(figsize=fig_size)
         plt.grid(True)
+        plt.scatter(all_v_px, all_z_sim, s=5, color='blue', marker="o", alpha=0.005, label='Punti simulati')
+        plt.plot(v_px_fitted, z_fitted, color='red', linewidth=2, label=f'Curva stimata: K={K_estimated:.2f}')
+        plt.title(f'All simulation for $V_{{ext}}$ = {velocity_key.split("_")[-1]} ($\\frac{{m}}{{s}}$)')
+
+        plt.xlabel('$v_{px}$ [$\\frac{px}{s}$]', fontsize=20)
+
+        plt.ylabel('$z [m]$', fontsize=20)
+        plt.ylim(0, 3)
+        plt.xlim(0,3800)
+        plt.legend(fontsize=15)
+        plt.tick_params(axis='both', which='major', labelsize=label_size_axes)
+        plt.subplots_adjust(bottom=adjusto)
+        existing_files = [f for f in os.listdir(save_directory) if os.path.isfile(os.path.join(save_directory, f))]
+        next_file_number = len(existing_files) + 1
+        # Generate a file name based on the next file number
+        file_name = f"{next_file_number}.png"
+        file_path = os.path.join(save_directory, file_name)
+        plt.savefig(file_path, bbox_inches='tight')
+
         plt.show()
 
         # Stampa il valore di sigma_0
-        print(f'Sigma_0 per la velocità {velocity_key}: {sigma_0:.4f}')
+        print(f'Sigma_0 - ALL SIM - residui {velocity_key}: {sigma_0:.4f}')
+
+
 
 
 def analyze_clusters_sigma_vs_px_velocity(modelled_df, vpx_bin_width=10):
     """
     Per ogni DataFrame che contiene i valori di K e sigma_0, calcola i residui rispetto
     al modello z = K / v_px per ogni punto simulato. Divide i dati di v_px in intervalli di ampiezza fissa
-    (es. 10 unità), calcola la media dei residui per ogni intervallo, e plotta il grafico.
+    (es. 10 unità), calcola la media dei residui per ogni intervallo, e plotta un singolo grafico con tutti i set di dati.
 
     Parametri:
     - modelled_df: dizionario con DataFrame per ogni velocità, contenente i valori di v_px, z_sim, K e sigma_0.
     - vpx_bin_width: ampiezza dell'intervallo per raggruppare i valori di v_px.
 
     Ritorna:
-    - Nessun valore di ritorno, ma plotta un grafico per ogni velocità.
+    - Nessun valore di ritorno, ma plotta un grafico unico con tutte le velocità.
     """
+    plt.figure(figsize=fig_size)
+    plt.grid(True)
 
     for velocity_key, df in modelled_df.items():
         # Numero di punti simulati (viene calcolato dinamicamente)
@@ -318,22 +462,32 @@ def analyze_clusters_sigma_vs_px_velocity(modelled_df, vpx_bin_width=10):
                 mean_residuals.append(np.mean(residuals[bin_mask]))
                 mean_v_px.append(np.mean(all_v_px[bin_mask]))
 
-        # Plot del grafico per la velocità corrente
-        plt.figure(figsize=(8, 6))
-        plt.scatter(mean_v_px, mean_residuals, marker='o', color='b', label='Errore medio')
-        plt.title(f'Residui medi (GT wrt Modello) vs $v_{{px}}$ per la velocità: {velocity_key}')
-        plt.xlabel('$v_{{px}}$ medio (binned)')
-        plt.ylabel('Residuo medio')
-        plt.grid(True)
-        plt.legend()
-        plt.show()
+        # Aggiungi al grafico
+        plt.scatter(mean_v_px, mean_residuals, marker='o', label=f'$V_{{ext}}$ = {velocity_key.split("_")[-1]} ($\\frac{{m}}{{s}}$)')
 
+    # Configurazione del grafico
+    plt.title('Mean Residuals', fontsize=20)
+    plt.xlabel('$v_{px}$ [$\\frac{px}{s}$]', fontsize=20)
+    plt.ylabel('$\\epsilon$ [m]', fontsize=20)
+    plt.tick_params(axis='both', which='major', labelsize=label_size_axes)
+
+    plt.legend(fontsize=15)
+    plt.subplots_adjust(bottom=adjusto)
+    existing_files = [f for f in os.listdir(save_directory) if os.path.isfile(os.path.join(save_directory, f))]
+    next_file_number = len(existing_files) + 1
+    # Generate a file name based on the next file number
+    file_name = f"{next_file_number}.png"
+    file_path = os.path.join(save_directory, file_name)
+    plt.savefig(file_path, bbox_inches='tight')
+    plt.show()
 
 
 def plot_sigma_histograms(updated_dfs):
+
     """
-    Per ogni DataFrame nel dizionario 'updated_dfs', genera un istogramma di sigma_0
-    e calcola il valore RMS di sigma_0. Mostra 5 istogrammi e calcola 5 valori RMS.
+    Per ogni DataFrame nel dizionario 'updated_dfs', genera un istogramma di sigma_0 in percentuale,
+    calcola il valore RMS di sigma_0, disegna la gaussiana perfetta normalizzata per adattarsi
+    all'istogramma in percentuale, e una retta verticale sul valore RMS calcolato.
 
     Parametri:
     - updated_dfs: dizionario con DataFrame per ogni velocità, contenente i valori di K e sigma_0
@@ -350,16 +504,50 @@ def plot_sigma_histograms(updated_dfs):
         sigma_0_values = velocity_df['sigma_0'].values
 
         # Calcola il valore RMS di sigma_0 per questa velocità
-        sigma_rms = np.sqrt(np.mean(sigma_0_values**2))
+        sigma_rms = np.sqrt(np.mean(sigma_0_values ** 2))
         sigma_rms_values[velocity_key] = sigma_rms  # Salva il valore RMS per questa velocità
 
-        # Plot dell'istogramma di sigma_0
-        plt.figure(figsize=(8, 6))
-        plt.hist(sigma_0_values, bins=20, color='skyblue', edgecolor='black')
-        plt.title(f'Istogramma di $\\sigma_0$ - Velocity: {velocity_key}')
-        plt.xlabel('$\\sigma_0$')
-        plt.ylabel('Frequenza')
+        # Parametri per la distribuzione normale (media e deviazione standard)
+        mu, std = np.mean(sigma_0_values), np.std(sigma_0_values)
+
+        # Genera l'istogramma per ottenere le informazioni sui bin
+        num_bins = 20
+        counts, bin_edges = np.histogram(sigma_0_values, bins=num_bins)
+        bin_width = bin_edges[1] - bin_edges[0]
+        total_count = len(sigma_0_values)
+
+        # Converti i conteggi in percentuale
+        counts_percentage = (counts / total_count) * 100
+
+        # Genera la gaussiana normalizzata per l'istogramma in percentuale
+        x = np.linspace(bin_edges[0], bin_edges[-1], 1000)
+        gaussian = (stats.norm.pdf(x, mu, std) * total_count * bin_width) / total_count * 100
+
+        # Plot dell'istogramma
+        plt.figure(figsize=fig_size)
         plt.grid(True)
+        plt.hist(sigma_0_values, bins=20, color='skyblue', edgecolor='black', alpha=0.7,
+                 label='$\sigma_0$')
+
+        plt.plot(x, gaussian, color='black', linestyle='--')
+        plt.axvline(sigma_rms, color='red', linestyle='--', label=f'RMS $\\sigma_0$: {sigma_rms:.4f}')
+
+        # Configurazione del grafico
+        plt.title(f'Histogram of $\\sigma_0$, $V_{{ext}}$ = {velocity_key.split("_")[-1]} $\\frac{{m}}{{s}}$', fontsize=20)
+        plt.xlabel('$\\sigma_0$ [m]', fontsize=20)
+        plt.ylabel('Frequency (%)', fontsize=20)
+
+        plt.legend(fontsize=15)
+        # Configurazione dei ticks con font impostato
+        plt.tick_params(axis='both', which='major', labelsize=label_size_axes)
+        plt.subplots_adjust(bottom=adjusto)
+        existing_files = [f for f in os.listdir(save_directory) if os.path.isfile(os.path.join(save_directory, f))]
+        next_file_number = len(existing_files) + 1
+        # Generate a file name based on the next file number
+        file_name = f"{next_file_number}.png"
+        file_path = os.path.join(save_directory, file_name)
+        plt.savefig(file_path, bbox_inches='tight')
+
         plt.show()
 
         # Stampa il valore RMS di sigma_0
@@ -429,7 +617,7 @@ def estimate_k_and_sigma0(velocity_simulations_dfs):
                 z_fitted = hyperbolic_model(vx_fitted, K_estimated)  # Calcola i valori z teorici
 
                 # Plot dei dati e della curva stimata con i 50 punti
-                plt.figure(figsize=(8, 6))
+                plt.figure(figsize=fig_size)
                 plt.scatter(vx_sim, z_sim, color='blue', label='Data points')
                 plt.plot(vx_fitted, z_fitted, color='red', label=f'Fitted curve: K={K_estimated:.2f}')
                 plt.title(f'Simulation {index + 1} - Velocity: {velocity_key}')
@@ -437,6 +625,14 @@ def estimate_k_and_sigma0(velocity_simulations_dfs):
                 plt.ylabel('z')
                 plt.legend()
                 plt.grid(True)
+                plt.subplots_adjust(bottom=adjusto)
+                existing_files = [f for f in os.listdir(save_directory) if
+                                  os.path.isfile(os.path.join(save_directory, f))]
+                next_file_number = len(existing_files) + 1
+                # Generate a file name based on the next file number
+                file_name = f"{next_file_number}.png"
+                file_path = os.path.join(save_directory, file_name)
+                plt.savefig(file_path, bbox_inches='tight')
                 plt.show()
 
         # Aggiungi le nuove colonne 'K' e 'sigma_0' al DataFrame corrente
@@ -448,12 +644,33 @@ def estimate_k_and_sigma0(velocity_simulations_dfs):
 
     return updated_dfs
 
-def generate_montecarlo_simulations(file_path, num_simulations=100, z_std_dev=0.05, vpx_std_dev=10.0, plot=False):
+
+def apply_moving_average_filter(vx_simulated, z_simulated, win):
+    """
+    Applica un filtro a media mobile a vx_simulated e regola la lunghezza di z_simulated
+    per adattarsi alla lunghezza ridotta di vx_simulated a causa del filtro.
+
+    Parametri:
+    - vx_simulated: array dei valori simulati di vx.
+    - z_simulated: array dei valori simulati di z.
+    - win: dimensione della finestra per il filtro a media mobile.
+
+    Ritorna:
+    - vx_filtered: array di vx simulati filtrati.
+    - z_adjusted: array di z simulati adattati.
+    """
+
+    # Applica il filtro a media mobile a vx_simulated
+    vx_filtered = np.convolve(vx_simulated, np.ones(win) / win, mode='valid')
+
+    # Adatta la lunghezza di z_simulated
+    z_adjusted = z_simulated[:len(vx_filtered)]
+
+    return vx_filtered, z_adjusted
+def generate_montecarlo_simulations(window, file_path, num_simulations=200, z_std_dev=0.05, vpx_std_dev=10.0, plot=False):
     """
     Esegue simulazioni Monte Carlo per ciascuna velocità 3D (v_3d) in un file di input.
-    Per ogni velocità, simula un numero di punti pari al numero di punti presenti nel dataset originale,
-    usando i valori del dataset come media e valori di deviazione standard definiti. Può opzionalmente
-    plottare ogni simulazione.
+    Filtra i dati di velocità v_px con una media mobile, quindi genera simulazioni Monte Carlo.
 
     Parametri:
     - file_path: percorso del file Excel con i dati originali.
@@ -465,7 +682,6 @@ def generate_montecarlo_simulations(file_path, num_simulations=100, z_std_dev=0.
     Ritorna:
     - Un dizionario con una chiave per ogni velocità (v_3d) e un DataFrame contenente i risultati delle simulazioni.
     """
-
     # Carica i dati dal file Excel
     df = pd.read_excel(file_path)
 
@@ -480,16 +696,26 @@ def generate_montecarlo_simulations(file_path, num_simulations=100, z_std_dev=0.
         # Filtra i dati per la velocità corrente
         velocity_df = df[df['vx_3D'] == velocity]
 
+        # Filtra vx con una media mobile, se necessario
+        if window > 1:
+            print(f"WINDOWING for velocity {velocity}")
+            vx_filtered = np.convolve(velocity_df['vx'].values, np.ones(window) / window, mode='valid')
+            z_adjusted = velocity_df['z_mean'].values[:len(vx_filtered)]  # Adatta z_mean alla lunghezza di vx_filtered
+        else:
+            vx_filtered = velocity_df['vx'].values
+            z_adjusted = velocity_df['z_mean'].values
+
         # Lista per memorizzare tutte le simulazioni per la velocità corrente
         all_simulations = []
 
         # Esegui le simulazioni Monte Carlo
         for sim_num in range(num_simulations):
             if sim_num % 50 == 0:
-                print(sim_num, end="")
+                print(sim_num, end=" ")
+
             # Genera valori simulati per ciascun punto del dataset
-            vx_simulated = np.abs(np.random.normal(velocity_df['vx'].values * 60, vpx_std_dev))
-            z_simulated = np.random.normal(velocity_df['z_mean'].values, z_std_dev)
+            vx_simulated = np.abs(np.random.normal(vx_filtered * 60, vpx_std_dev))
+            z_simulated = np.random.normal(z_adjusted, z_std_dev)
 
             # Crea una riga di simulazione concatenando i valori simulati di vx e z
             simulation_row = np.concatenate([vx_simulated, z_simulated])
@@ -497,18 +723,20 @@ def generate_montecarlo_simulations(file_path, num_simulations=100, z_std_dev=0.
 
             # Plot della simulazione corrente, se richiesto
             if plot:
-                plt.figure(figsize=(8, 6))
+                plt.figure(figsize=fig_size)
                 plt.scatter(vx_simulated, z_simulated, color='blue', alpha=0.6, label='Simulazione Monte Carlo')
                 plt.xlabel('v_px (simulato) [px/s]')
                 plt.ylabel('z (simulato)')
                 plt.title(f'Simulazione Monte Carlo #{sim_num + 1} per velocità {velocity}')
                 plt.grid(True)
                 plt.legend()
+                plt.subplots_adjust(bottom=adjusto)
                 plt.show()
+
         print("simulation terminated")
 
         # Nomi delle colonne per i risultati (es. vx_1, vx_2, ..., z_1, z_2, ...)
-        column_names = [f'vx_{i + 1}' for i in range(len(velocity_df))] + [f'z_{i + 1}' for i in range(len(velocity_df))]
+        column_names = [f'vx_{i + 1}' for i in range(len(vx_filtered))] + [f'z_{i + 1}' for i in range(len(vx_filtered))]
 
         # Trasforma i risultati delle simulazioni in un DataFrame
         simulations_df = pd.DataFrame(all_simulations, columns=column_names)
@@ -613,7 +841,7 @@ def bland_altman_plot(x, y, k, save_path, file_name="bland_altman_plot.png"):
     upper_limit = mean_diff + 1.96 * std_diff
 
     # Creazione del grafico Bland-Altman
-    plt.figure(figsize=(10, 5))
+    plt.figure(figsize=fig_size)
     plt.scatter(mean, diff, color='blue', s=50, label='Differenze')
     plt.axhline(mean_diff, color='gray', linestyle='--', label='Media delle differenze')
     plt.axhline(lower_limit, color='red', linestyle='--', label='Limite inferiore (95%)')
@@ -658,7 +886,7 @@ def convert_robot_in_staircase_signal(noisy_signal, quantization_levels = v_all)
     if SHOW_STAIRCASE_ROBOT:
 
 
-        plt.figure(figsize=(15, 6))
+        plt.figure(figsize=fig_size)
         plt.plot(noisy_signal, label='Noisy Signal', linestyle='--', alpha=0.5)
         plt.plot(smoothed_signal, label='Smoothed Signal', alpha=0.75)
         plt.plot(quantized_signal, label='Quantized Signal', linewidth=2)
@@ -754,7 +982,7 @@ def filter_steady_state_speed(data_frame, vel_robot, window_size=13, slope_thres
     if SHOW_FILTRATION_SIGNAL_OF:
 
        # Plot before and after filtering
-        plt.figure(figsize=(12, 6))
+        plt.figure(figsize=fig_size)
 
         plt.subplot(2, 1, 1)
         plt.plot(original_vel_robot, label='Original Velocity')
@@ -867,7 +1095,7 @@ def calculate_theo_model_and_analyze(n_df, n_vy, win, vlim):
                 if 1:
                     if n_df[vx_col].iloc[i] == 0:
                         print("ZERO OF", vx_col)
-                        plt.figure(figsize=(10, 5))
+                        plt.figure(figsize=fig_size)
                         plt.plot(n_df[vx_col])
                         plt.grid(True)
                         plt.show()
@@ -1139,7 +1367,7 @@ def merge_dataset_extr_int(x, vy):
         n_z_columns = [col for col in n_df.columns if '_z' in col]
 
         # # Create a plot with three subplots
-        # fig, axs = plt.subplots(3, 1, figsize=(12, 15))
+        # fig, axs = plt.subplots(3, 1, figsize=fig_size)
         #
         # # First subplot for vx_columns
         # for col in n_vx_columns:
@@ -1257,7 +1485,7 @@ def merge_dataset_extr_int(x, vy):
     r2_4, rmse_4 = calculate_metrics(all_z_4_MRU_quant_w, all_dist_4_MRU_quant_w)
 
     # Creare la figura con 4 subplots
-    fig, axs = plt.subplots(2, 2, figsize=(12, 10))
+    fig, axs = plt.subplots(2, 2, figsize=fig_size)
     plt.subplots_adjust(hspace=0.4, wspace=0.4)
 
     # Funzione per creare i plot di regressione
@@ -1313,7 +1541,7 @@ def merge_dataset_extr_int(x, vy):
     colors = sns.color_palette("tab10", 4)
 
     # Creare la figura con 4 subplots
-    fig, axs = plt.subplots(2, 2, figsize=(12, 10))
+    fig, axs = plt.subplots(2, 2, figsize=fig_size)
     plt.subplots_adjust(hspace=0.4, wspace=0.4)
 
     # Funzione per creare gli istogrammi e le curve normali
@@ -1487,7 +1715,7 @@ def windowing_vs_uncertanty(file_path):
             # Save the data to the file
             save_to_file_OF_results("constant.txt", estimated_constant, constant_uncertainty, key)
 
-            plt.figure(figsize=(15, 10))
+            plt.figure(figsize=fig_size)
 
             # Plot raw data points and the model
             plt.scatter(x, y, label='Raw Data', color=color_p, s=35, alpha=0.05, marker="o", edgecolor="black")
@@ -1539,7 +1767,7 @@ def windowing_vs_uncertanty(file_path):
     plt.close('all')
 
     # Create subplots
-    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(8, 10))
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=fig_size)
 
     # Plot 1: Uncertainty associated with model parameters
     for i in range(len(v_ext)):
@@ -1713,7 +1941,7 @@ def show_result_ex_file(file_path):
         print(f'Mean Absolute Error: {mae:.4f}')
 
         # Create the plot
-        plt.figure(figsize=(8, 6))
+        plt.figure(figsize=fig_size)
 
         # Prepare the data
         data = pd.DataFrame({
@@ -1813,7 +2041,7 @@ def constant_analisis():
 
     sigma3 = [element * 3 for element in constant_uncert_data]
 
-    plt.figure(figsize=(12, 7))
+    plt.figure(figsize=fig_size)
 
     # Plot
     plt.scatter(velocity_data, constant_data, label='Data', s=15)
@@ -1945,7 +2173,7 @@ def convert_position_to_speed():
                 df_increments[col] = increments  # Assign the increments to the increments DataFrame
 
         # Plot the original 'vx' values
-        plt.figure(figsize=(10, 6))
+        plt.figure(figsize=fig_size)
         for col in df.columns:
             if '_vx' in col:
                 plt.scatter(df['timestamp'], df[col], label=col, s=2)
@@ -1962,7 +2190,7 @@ def convert_position_to_speed():
         df_combined.to_csv(file_path_of, index=False)
 
         # Plot the 'vx' increments
-        plt.figure(figsize=(10, 6))
+        plt.figure(figsize=fig_size)
         for col in df_increments.columns:
             plt.scatter(df['timestamp'], df_increments[col], label=col + ' Increment', s=2)
 
@@ -2617,28 +2845,35 @@ if EXPERIMENTAL_MODEL_METROLOGICAL_ASSESTMENT:
     #incertezza pixel = 1px (al frame)
     #incertezza dt = 0,00013 s (1 frame)
     #incertezza vpx = 60px/s
-
-
-    file_path_1 = 'dati_of/all_points_big_fix_speed.xlsx'
-
-
-
-    montecarlo_results = generate_montecarlo_simulations(file_path_1, z_std_dev=0.005, vpx_std_dev=1.0)
-
-
-    modelled_df = estimate_k_and_sigma0(montecarlo_results)
+    windows = [1,3]
+    for win in windows:
+        montecarlo_results = {}
 
 
 
-    sigmas = plot_sigma_histograms(modelled_df)
+        file_path_1 = 'dati_of/all_points_big_fix_speed.xlsx'
 
 
-    analyze_clusters_sigma_vs_px_velocity(modelled_df)
-    analyze_std_dev_of_zModel_by_vx(modelled_df)
-    combined_analysis_sigma_vs_vx(modelled_df)
 
-    plot_all_simulated_values(modelled_df)
+        montecarlo_results = generate_montecarlo_simulations(win, file_path_1, z_std_dev=0.005, vpx_std_dev=1.0)
 
+
+        modelled_df = estimate_k_and_sigma0(montecarlo_results) # per ogni generazione di n valori stimo un modello e una sigma zero del modello -  residui
+
+
+
+        sigmas = plot_sigma_histograms(modelled_df)
+
+        #non usato
+        analyze_clusters_sigma_vs_px_velocity(modelled_df)
+
+
+
+        analyze_std_dev_of_zModel_by_vx(modelled_df)
+        combined_analysis_sigma_vs_vx(modelled_df)
+        combined_analysis_all_velocities(modelled_df)
+
+        plot_all_simulated_values(modelled_df)
 
 # Flag for performing experimental model fitting and graph generation
 EXPERIMENTAL_MODEL_FITTING = 0
