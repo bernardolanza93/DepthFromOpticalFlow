@@ -14,12 +14,15 @@ MAX_SPEED=0.70
 SHOW_STAIRCASE_ROBOT = 0
 SHOW_FILTRATION_SIGNAL_OF = 0
 
-fig_size = (8,6)
+fig_size = (9,6)
 adjusto = 0.15
 label_size_axes = 20
 labelxy_size = 20
 title_font_size = 20
 y_limiter = 1.3
+y_lim_starter = -0.1
+sns_dot_size = 80
+x_lim_defined = (0,3800)
 
 # Directory where graphs are saved
 save_directory = "graphs"
@@ -92,7 +95,7 @@ def combined_analysis_all_velocities(modelled_df, vpx_bin_width=30):
         combined_values = [np.sqrt(mean_residuals[i]**2 + std_devs[i]**2) for i in range(len(mean_residuals))]
 
         # Aggiungi la curva al grafico (dentro il ciclo)
-        sns.scatterplot(x=mean_v_px, y=combined_values, marker='o', s=50, alpha=0.4, edgecolor="black",
+        sns.scatterplot(x=mean_v_px, y=combined_values, marker='o', s=sns_dot_size, alpha=0.8, edgecolor="black",
                         linewidth=0.6,
                         label=f'$V_{{ext}}$ = {velocity_key.split("_")[-1]}$ \\left(\\frac{{m}}{{s}}\\right)$')
 
@@ -101,6 +104,7 @@ def combined_analysis_all_velocities(modelled_df, vpx_bin_width=30):
     plt.title(r'$\sigma_z$, $\epsilon$ and RMS($\sigma_z$ + $\epsilon$), all $V_{ext}$', fontsize=20)
     plt.xlabel(r'$v_{px}$ $\left[\frac{px}{s}\right]$', fontsize=labelxy_size)
     plt.ylabel('[m]', fontsize=labelxy_size)
+    plt.xlim(x_lim_defined)
 
     # Formattazione degli assi
     plt.tick_params(axis='both', which='major', labelsize=label_size_axes)
@@ -184,22 +188,22 @@ def combined_analysis_sigma_vs_vx(modelled_df, vpx_bin_width=30):
         plt.figure(figsize=fig_size)
 
         # Disegna le linee mantenendo lo stile originale
-        sns.lineplot(x=mean_v_px, y=combined_values, color='g', label=r'RMS($\epsilon$ + $\sigma_z$)')
+        sns.lineplot(x=mean_v_px, y=combined_values, color='g', label=r'Total Uncertainty')
         sns.lineplot(x=mean_v_px, y=mean_residuals, color='b', linestyle='--', label=r'RMS Residuals $\epsilon$')
         sns.lineplot(x=mean_v_px, y=std_devs, color='r', linestyle=':', label=r'$\sigma_z$')
 
         # Aggiungi scatterplot per rendere i punti più visibili
-        sns.scatterplot(x=mean_v_px, y=combined_values, marker='o', color='g', s=100, alpha=0.5, edgecolor="black")
-        sns.scatterplot(x=mean_v_px, y=mean_residuals, marker='x', color='b', s=100, alpha=0.5, edgecolor="black")
-        sns.scatterplot(x=mean_v_px, y=std_devs, marker='s', color='r', s=100, alpha=0.5, edgecolor="black")
+        sns.scatterplot(x=mean_v_px, y=combined_values, marker='o', color='g', s=sns_dot_size, alpha=0.5, edgecolor="black")
+        sns.scatterplot(x=mean_v_px, y=mean_residuals, marker='x', color='b', s=sns_dot_size, alpha=1, edgecolor="black")
+        sns.scatterplot(x=mean_v_px, y=std_devs, marker='s', color='r', s=sns_dot_size, alpha=1, edgecolor="black")
 
         # Titolo e assi
         clean_velocity_key = velocity_key.split("_")[-1].strip().replace('\x0c', '').replace('\r', '')
-        #plt.title(f'σz, ε and RMS(σz + ε); Vext = {clean_velocity_key} (m/s)', fontsize=title_font_size)
+        plt.title(f'RMS sum contrib, Vext = {clean_velocity_key} (m/s)', fontsize=title_font_size)
         plt.xlabel(r'$v_{px}$ [$\frac{px}{s}$]', fontsize=labelxy_size)
         plt.ylabel('[m]', fontsize=labelxy_size)
-        plt.xlim(0, 3800)
-        plt.ylim(0, y_limiter)
+        plt.xlim(x_lim_defined)
+        plt.ylim(y_lim_starter, y_limiter)
 
         # Modifica la grandezza dei numeri sugli assi
         plt.tick_params(axis='both', which='major', labelsize=label_size_axes)
@@ -272,7 +276,7 @@ def analyze_std_dev_of_zModel_by_vx(modelled_df, vpx_bin_width=30):
 
 
         # Aggiungi al grafico (dentro il ciclo)
-        sns.scatterplot(x=mean_v_px, y=std_devs, marker='o', s=50, alpha=0.5, edgecolor="black",
+        sns.scatterplot(x=mean_v_px, y=std_devs, marker='o', s=sns_dot_size, alpha=0.8, edgecolor="black",
                         label=f'$V_{{ext}}$ = {velocity_key.split("_")[-1]}$ \\left(\\frac{{m}}{{s}}\\right)$')
 
     # Configurazione del grafico
@@ -280,7 +284,8 @@ def analyze_std_dev_of_zModel_by_vx(modelled_df, vpx_bin_width=30):
     plt.xlabel(r'$v_{px}$ $\left[\frac{px}{s}\right]$', fontsize=labelxy_size)
     plt.ylabel(r'$\sigma_z$ [m]', fontsize=labelxy_size)
     plt.tick_params(axis='both', which='major', labelsize=label_size_axes)
-    plt.ylim(0,0.1)
+    plt.ylim(-0.01,0.1)
+    plt.xlim(x_lim_defined)
 
     # Mostra la legenda
     plt.legend(fontsize=15)
@@ -510,7 +515,7 @@ def analyze_clusters_sigma_vs_px_velocity(modelled_df, vpx_bin_width=10):
 
 
         # Aggiungi i punti con trasparenza e bordo nero per migliorare la leggibilità
-        sns.scatterplot(x=mean_v_px, y=mean_residuals, marker='o', s=50, alpha=0.4, edgecolor="black",
+        sns.scatterplot(x=mean_v_px, y=mean_residuals, marker='o', s=sns_dot_size, alpha=0.8, edgecolor="black",
                         linewidth=0.6,
                         label=f'$V_{{ext}}$ = {velocity_key.split("_")[-1]}$ \\left(\\frac{{m}}{{s}}\\right)$')
 
@@ -518,7 +523,8 @@ def analyze_clusters_sigma_vs_px_velocity(modelled_df, vpx_bin_width=10):
     plt.title('RMS Residuals of RANGE', fontsize=20)
     plt.xlabel(r'$v_{px}$ $\left[\frac{px}{s}\right]$', fontsize=20)
     plt.ylabel(r'$\epsilon$ [m]', fontsize=20)
-    plt.ylim(0,y_limiter)
+    plt.ylim(y_lim_starter,y_limiter)
+    plt.xlim(x_lim_defined)
 
     # Formattazione degli assi
     plt.tick_params(axis='both', which='major', labelsize=label_size_axes)
@@ -604,8 +610,9 @@ def plot_sigma_histograms(updated_dfs):
         file_name = f"{next_file_number}.png"
         file_path = os.path.join(save_directory, file_name)
         plt.savefig(file_path, bbox_inches='tight')
+        plt.close()
 
-        plt.show()
+        #plt.show()
 
         # Stampa il valore RMS di sigma_0
         print(f'Valore RMS di $\\sigma_0$ per la velocità {velocity_key}: {sigma_rms:.4f} [m]')
@@ -724,7 +731,7 @@ def apply_moving_average_filter(vx_simulated, z_simulated, win):
     z_adjusted = z_simulated[:len(vx_filtered)]
 
     return vx_filtered, z_adjusted
-def generate_montecarlo_simulations(window, file_path, num_simulations=2000, z_std_dev=0.05, vpx_std_dev=10.0, plot=False):
+def generate_montecarlo_simulations(window, file_path, num_simulations=5000, z_std_dev=0.05, vpx_std_dev=10.0, plot=False):
     def moving_average_filter(vx_values, window):
         """
         Applica un filtro a media mobile "trailing" al vettore vx_values:
@@ -1729,6 +1736,7 @@ def compute_dz(Vx, Vx_prime, fx):
     fy (float): Focal length
     """
     dz = ((Vx * fx) / Vx_prime)
+    return dz
 
 @log_function_call
 def windowing_vs_uncertanty(file_path):
@@ -1971,7 +1979,7 @@ def show_result_ex_file(file_path):
         x = [element * 60 for element in x_fps]
         y = data['z_mean']
 
-        SMOOTHING = 1
+        SMOOTHING = 0
         window = 0
 
         if SMOOTHING:
@@ -2028,8 +2036,10 @@ def show_result_ex_file(file_path):
         # Additional plot
         Y_theoretical = []
         for i in range(len(Vx_prime_values)):
+
             dzi = compute_dz(float(key), Vx_prime_values[i], fx)
             Y_theoretical.append(dzi)
+
 
         # Calculate the minimum distance for each experimental point
         min_distances = []
@@ -2084,16 +2094,16 @@ def show_result_ex_file(file_path):
         # Plot raw data points and the model
         sns.scatterplot(x='x', y='y', data=data, label='Raw Data', color=color_p, s=50, alpha=0.3, marker="^",
                         edgecolor="black")
-        sns.lineplot(x='x_model', y='y_model', data=data, label=r'Experimental model $d = k_{{exp}}/v_{{px}}$',
-                     color='black', linestyle='-.')
-        sns.lineplot(x='Vx_prime_values', y='Y_theoretical', data=data, color="grey",
-                     label=r'Analytical model $d = V_{{ext}} ⋅ f_{{y}}/v_{{px}}$', alpha=0.7, linewidth=2)
+        sns.lineplot(x='x_model', y='y_model', data=data, label=r'Experimental model',
+                     color='red', linestyle='-.', alpha=0.7, linewidth = 4)
+        sns.lineplot(x='Vx_prime_values', y='Y_theoretical', data=data,
+                     label=r'Analytical model', color="black",linestyle='-', alpha=1)
 
-        plt.xlabel(r'$v_{px}$ [$px/s$]', fontsize=16)
-        plt.ylabel('Depth [m]', fontsize=16)
+        plt.xlabel(r'$v_{px}$ [$px/s$]', fontsize=18)
+        plt.ylabel('Depth [m]', fontsize=18)
         plt.ylim(0, 2.1)
-        plt.xticks(fontsize=14)
-        plt.yticks(fontsize=14)
+        plt.xticks(fontsize=18)
+        plt.yticks(fontsize=18)
         plt.grid(True, which='both', linestyle='--', linewidth=0.5)
 
         # Calculate systematic error
@@ -2106,7 +2116,7 @@ def show_result_ex_file(file_path):
         theoretical_constant = fx * float(key)
 
         # Plot title
-        plt.title(f'Optical pixel displacement vs. depth. Performed at $V_{{ext}}$ = {key} m/s', fontsize=18,
+        plt.title(f' Performed at $V_{{ext}}$ = {key} m/s', fontsize=18,
                   fontweight='bold', pad=15)
 
         # Position the legend at the top right
